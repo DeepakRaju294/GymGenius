@@ -2,6 +2,8 @@
 
 Scope: the recommendation/optimization engine and progress visualization — the two pieces of the product that don't exist yet — plus every other gap found while auditing the codebase. Basic CRUD (auth, goals, workout logging/history) already works end-to-end and is not re-documented here.
 
+> **Revision note**: updated after a design review. The roadmap now ships a simple end-to-end recommendation loop (selection + plain progressive overload) before plateau detection exists at all, so the architecture gets validated with real traffic before the harder algorithm is built on top of it. Progression state is event-sourced rather than overwrite-in-place, plateau thresholds are configurable instead of hardcoded, Redis is optional rather than a boot requirement, and plateau-logic tests move up next to the code instead of waiting for a general hardening phase.
+
 ## 1. Architecture today
 
 ```
@@ -15,7 +17,7 @@ ml (FastAPI, Python) ──reads/writes──> MongoDB (separate collections: wo
                        ──reads/writes──> Redis (recommendation cache)
 ```
 
-The three services exist as scaffolding but are not integrated: the ml service cannot start, and even if it could, it reads a different Mongo schema than the one the server actually writes. Redis is not deployed/configured anywhere yet either.
+The three services exist as scaffolding but are not integrated: the ml service cannot start, and even if it could, it reads a different Mongo schema than the one the server actually writes. Redis is not deployed/configured anywhere yet either — treat it as optional (see §4.4) rather than something blocking Phase 1; nothing about the recommendation loop requires a cache until there's an actual latency problem to solve.
 
 ## 2. Blocking defects (not gaps — things that are actively broken)
 
@@ -73,55 +75,132 @@ Add `timestamps: true`. Coerce `reps`/`weight` to `Number` client-side before PO
 
 ## 4. Recommendation / optimization engine
 
+### 4.0 The MVP loop — ship this before the plateau engine
+
+The recommender's job splits into three concerns that should stay separate in code, not just in this doc:
+
+- **Selection** — *which exercises* should today's session include (goal/equipment/muscle-balance/recency).
+- **Prescription** — *given* an exercise, what sets/reps/weight today (plain progressive overload).
+- **Adaptation** — *when normal prescription stops working*, what changes (plateau detection → REP_ADJUST → REVERSE → SWAPPED).
+
+The first shippable slice is Selection + Prescription wired all the way through, with the *response shape* Adaptation will later populate already in place:
+
+```json
+{
+  "exercise": "Bench Press",
+  "prescription": { "sets": 3, "reps": 5, "weight": 195, "unit": "lb" },
+  "strategy": "NORMAL",
+  "reason": "Up 5 lb from your last bench session.",
+  "change": { "previous": "185 lb × 8", "today": "195 lb × 5" }
+}
+```
+
+Adaptation later just starts populating `strategy` with `REP_ADJUST`/`REVERSE`/`SWAPPED` and writing a different `reason`/`change` — the client and the API contract don't change shape when plateau logic lands. This is why Phase 3 in the roadmap (§7) is "ship the simple loop end-to-end," not "build the plateau engine": it validates the client↔server↔ml wiring and the data model against real usage before the harder algorithm is built on top of assumptions no one has tested yet.
+
 ### 4.1 What exists today (and its gap)
 
-`score_rules()` (`features.py`) is a reasonable *exercise-selection* ranker (goal alignment + recency + frequency + success-rate weighting) — worth keeping. But `apply_progression()` is not the progression logic the product needs: it unconditionally adds +2.5/+5 lbs to whatever was last logged, regardless of whether the user actually progressed, stalled, or regressed. `success_rate()` is a stub returning `1.0` for everything. There is no plateau detection and no "try lower reps/higher weight → if that fails, reverse → if that fails, swap exercise" logic anywhere in the codebase.
+`score_rules()` (`features.py`) is a reasonable Selection-stage ranker (goal alignment + recency + frequency + success-rate weighting) — worth keeping. But `apply_progression()` is not real Prescription logic: it unconditionally adds +2.5/+5 lbs to whatever was last logged, regardless of whether the user actually progressed, stalled, or regressed. `success_rate()` is a stub returning `1.0` for everything. There is no Adaptation stage at all — no plateau detection, no "try lower reps/higher weight → if that fails, reverse → if that fails, swap exercise" logic anywhere in the codebase.
 
-### 4.2 Plateau-detection state machine (new)
+### 4.2 Plateau-detection state machine (Adaptation — build after §4.0 ships)
 
-Per `(username, exerciseId)`, track a **progression state** in a new collection `progression_state`:
+Don't make a single current-state document the only record of what happened — it can't answer "why did this change three weeks ago," and it can't feed chart annotations (§5.3) after the fact. Split into two collections:
 
+**`progression_state`** — current status per `(username, exerciseId)`, one document, overwritten as state changes:
 ```js
-{ username, exerciseId, state: 'NORMAL' | 'REP_ADJUST' | 'REVERSE' | 'SWAPPED',
-  enteredStateAt: Date, stallSessions: Number, lastEstimated1RM: Number }
+{ username, exerciseId,
+  currentStrategy: 'NORMAL' | 'REP_ADJUST' | 'REVERSE' | 'SWAPPED',
+  strategyStartedAt: Date, strategySessionCount: Number,
+  baselineEstimated1RM: Number, lastEvaluatedAt: Date, reason: String }
 ```
+
+**`progression_events`** — append-only audit trail, one document per transition, never overwritten:
+```js
+{ username, exerciseId, ts: Date,
+  type: 'PLATEAU_DETECTED' | 'REP_ADJUST_STARTED' | 'REVERSE_STARTED' | 'EXERCISE_SWAPPED' | 'PROGRESS_RESUMED',
+  metrics: { estimated1RM: Number, priorEstimated1RM: Number } }
+```
+`progression_state` answers "what should I recommend right now"; `progression_events` answers "what happened and when" — the latter is what `StrengthProgressChart` (§5.3) annotates against.
 
 **Trend signal**: estimated 1RM per session via the Epley formula — `weight * (1 + reps / 30)` — taken from the best set of that exercise in each session. Using estimated 1RM instead of raw weight lets a rep/weight trade-off (the whole point of the REP_ADJUST/REVERSE states) still register as progress or stall on a single comparable number.
 
-**Plateau trigger**: after at least 3 logged sessions of an exercise, compare estimated 1RM trend over the last 3 sessions. If the trend is flat-or-down (no session improves over the previous by more than a small epsilon, e.g. 2%), increment `stallSessions`; a real plateau is declared once `stallSessions >= 2` (i.e., two consecutive stalled comparisons, not one noisy session).
+**Plateau trigger**: configurable, not hardcoded — see the `ProgressionPolicy` below. Default policy: after at least 3 logged sessions of an exercise, compare estimated 1RM trend over the last 3 sessions; if no session improves over the previous by more than a 2% threshold, increment a stall counter; a plateau is declared once the counter reaches 2 (two consecutive stalled comparisons, not one noisy session).
+
+```python
+@dataclass
+class ProgressionPolicy:
+    plateau_window: int = 3
+    improvement_threshold: float = 0.02
+    stalls_before_intervention: int = 2
+    rep_adjust_sessions: int = 2   # sessions to trial REP_ADJUST before trying REVERSE
+    reverse_sessions: int = 2      # sessions to trial REVERSE before SWAPPED
+```
+Keeping these as constructor parameters (not literals inside the detection function) means thresholds can be tuned — or made per-user/per-goal later — without touching the state-machine logic itself.
 
 **State transitions**, evaluated each time `recommend()` builds an item for that exercise:
 
 ```
-NORMAL ──plateau──▶ REP_ADJUST ──still plateaued after 2 sessions──▶ REVERSE ──still plateaued──▶ SWAPPED
-  ▲                     │                                                │
-  └──── improvement resumes at any state ─────────────────────────────────┘
+NORMAL ──plateau──▶ REP_ADJUST ──still plateaued after rep_adjust_sessions──▶ REVERSE ──still plateaued after reverse_sessions──▶ SWAPPED
+  ▲                     │                                                        │
+  └──── improvement resumes at any state ──────────────────────────────────────────┘
 ```
 
 - **NORMAL**: current `apply_progression` behavior — small weight/rep increment session over session.
 - **REP_ADJUST**: lower target reps (e.g. −2 from the goal's rep range), raise weight (e.g. +5–10%). This replaces `apply_progression`'s flat increment for this exercise while in this state.
 - **REVERSE**: the opposite adjustment — raise reps (e.g. +3–4), lower weight back toward the pre-REP_ADJUST baseline. This is what "if that doesn't work, do the opposite" means concretely.
 - **SWAPPED**: stop recommending this exercise; call `candidate_pool()` filtered to the same `primaryMuscle` and excluding this `exerciseId`, and recommend a replacement. Keep `progression_state` for the original exercise (don't delete it — a user might return to it later) but mark it deprioritized so it isn't re-suggested immediately.
-- Any state resets to **NORMAL** the moment estimated 1RM improves beyond epsilon again.
+- Any state resets to **NORMAL** the moment estimated 1RM improves beyond the threshold again. Every transition writes one `progression_events` document.
 
 **Feedback loop wiring**: `POST /feedback` already accepts `action: accept | swap | thumbs_up | thumbs_down`. An explicit `swap` should immediately push that exercise's state forward one step (skip waiting for more stalled sessions) rather than only invalidating the cache as it does today — a user asking to swap is a stronger signal than a computed plateau.
 
-**Response contract addition**: `RecItem.reason` (already exists in `schemas.py`, currently unused for this) should carry a human-readable explanation, e.g. *"Bench press has plateaued at ~185 lb for 3 sessions — try 195 lb × 5 today."* This is what the client surfaces to the user; it's also the natural place to note when an exercise was swapped and why.
+**Response contract**: `strategy`/`reason`/`change` (§4.0) get populated for real once this lands, e.g. *reason: "Bench press has plateaued at ~185 lb for 3 sessions — try 195 lb × 5 today."*
 
 ### 4.3 Feature engineering work
 
 - Replace `success_rate()` stub with a real definition: fraction of an exercise's last N sessions where estimated 1RM improved over the prior session.
 - Wire `build_user_vector()` (currently computed but never called) into `score_rules()` — bias candidate selection toward muscle groups underrepresented in recent volume, so recommendations balance a user's training rather than only optimizing per-exercise progression.
-- Add a `plateau_state(username, exerciseId)` accessor that `recommenders.py` calls in place of the current unconditional `apply_progression()` call.
+- Add a `plateau_state(username, exerciseId)` accessor that the Prescription stage calls in place of the current unconditional `apply_progression()` call.
 
 ### 4.4 Fix order for Phase 1 (make it boot)
 
 1. Fix `app.util` → `app.utils` imports in `main.py`, `features.py`, `recommenders.py`.
 2. Fix `app.services.recommender` → `app.services.recommenders` in `main.py`; instantiate `recommender = Recommender()` at module scope.
 3. Fix the missing `)` at `recommenders.py:79`.
-4. Pin `pydantic>=2` consistently (schemas.py already assumes v2) and add `pymongo`, `redis` to `requirements.txt`.
+4. Pin `pydantic>=2` consistently (schemas.py already assumes v2) and add `pymongo` to `requirements.txt`. Add a `CACHE_ENABLED` env flag (default `false`) that gates every call into `utils/cache.py`; add `redis` as an optional dependency, not a hard boot requirement — nothing in §4.0's MVP loop needs caching, and Redis isn't deployed anywhere yet anyway. Revisit once there's an actual latency problem to solve.
 5. Point `fetch_user_history`/`equipment_profile` at the server's real `histories`/`profiles` collections (see §3) instead of `workouts`.
 6. Seed the `exercises` catalog collection — currently referenced everywhere and populated nowhere.
+
+### 4.5 Code organization
+
+`features.py` and `recommenders.py` are already carrying Selection, Prescription, and (soon) Adaptation logic in two files with no separation. Split along the §4.0 boundaries before Adaptation adds a fourth state machine on top of an already-overloaded `features.py`:
+
+```
+ml/app/services/
+  selection/
+    candidate_pool.py   # today's candidate_pool() + score_rules()
+    scorer.py
+  prescription/
+    progression.py       # today's apply_progression(), choose_sets_reps()
+    targets.py
+  adaptation/
+    plateau.py            # §4.2 trend/trigger detection
+    strategies.py          # REP_ADJUST / REVERSE / SWAPPED logic
+  recommender.py           # orchestrates the three stages, unchanged public interface
+```
+`Recommender.recommend()` becomes an orchestrator calling into the three packages rather than a single file accumulating every concern.
+
+### 4.6 Testing the plateau logic
+
+Build this alongside §4.2, not deferred to general hardening (§6/§7) — the state machine is small, deterministic, and easy to get subtly wrong, which is exactly what synthetic-history unit tests are for. Cover at minimum:
+
+- A flat-weight, flat-reps history over `plateau_window` sessions → plateau detected, transitions to `REP_ADJUST`.
+- An improving history → stays `NORMAL`, no false-positive plateau.
+- `REP_ADJUST` with subsequent improvement → resets to `NORMAL`.
+- `REP_ADJUST` with continued stall through `rep_adjust_sessions` → transitions to `REVERSE`.
+- `REVERSE` with continued stall through `reverse_sessions` → transitions to `SWAPPED`.
+- Improvement resuming from any non-`NORMAL` state → resets to `NORMAL` and logs a `PROGRESS_RESUMED` event.
+- Explicit `swap` feedback → advances state immediately regardless of `stallSessions`.
+
+Aim for on the order of 20–30 scenarios (boundary cases around the session-count thresholds, not just the happy path) before enabling this in production — this is cheap to test exhaustively and expensive to get wrong silently.
 
 ## 5. Progress visualization
 
@@ -144,7 +223,7 @@ Aggregation belongs in the server (it already owns Mongoose/the data), not the m
 
 A "Progress" tab/page, plus a recommendation surface on the Dashboard:
 
-- **StrengthProgressChart** — line chart of estimated 1RM per exercise over time, annotated with the plateau/adjustment transitions pulled from `progression_state` (e.g. a marker where the app switched to REP_ADJUST).
+- **StrengthProgressChart** — line chart of estimated 1RM per exercise over time, annotated with the plateau/adjustment transitions pulled from `progression_events` (e.g. a marker where the app switched to REP_ADJUST).
 - **MuscleVolumeChart** — stacked area/bar of weekly volume per muscle group.
 - **WorkoutFrequencyHeatmap** — GitHub-contributions-style calendar.
 - **PersonalRecordsList** — simple cards/table from the `/records` endpoint.
@@ -166,13 +245,16 @@ A "Progress" tab/page, plus a recommendation surface on the Dashboard:
 
 ## 7. Phased roadmap
 
+Ordered so the architecture gets proven with a simple recommendation loop before the harder Adaptation algorithm is built on top of it — not repair → sophisticated engine → UI, but repair → data model → simple loop → instrumentation → sophisticated optimization.
+
 | Phase | Work | Depends on |
 |---|---|---|
 | 0 | Security hygiene: stop tracking `config.env`, add `config.env.example` | — *(done in this change)* |
-| 1 | Fix ml service boot defects (§4.4 items 1–4); make `/healthz`/`/readyz` actually pass | Phase 0 |
+| 1 | Fix ml service boot defects (§4.4); make `/healthz`/`/readyz` actually pass; Redis optional via `CACHE_ENABLED` | Phase 0 |
 | 2 | Data model: exercise catalog + `historyModel` typed fields + repoint ml at real collections (§3) | Phase 1 |
-| 3 | Plateau-detection state machine (§4.2) + real `success_rate`/`build_user_vector` wiring (§4.3) | Phase 2 |
-| 4 | Client: call `/recommendation`, render suggestion + feedback controls | Phase 3 |
-| 5 | Server aggregation endpoints for visualization (§5.2) | Phase 2 |
-| 6 | Client charts: strength progression, muscle volume, frequency heatmap, PRs (§5.3) | Phase 5 |
-| 7 | Hardening: validation library, consistent response envelope, mass-assignment fix, pagination, CORS, tests | Independent — can run alongside 1–6 |
+| 3 | Ship the MVP loop end-to-end (§4.0): Selection (`score_rules`) + plain Prescription (`apply_progression`), `strategy`/`reason`/`change` response shape, client calls `/recommendation` and renders the suggestion with feedback controls | Phase 2 |
+| 4 | Recommendation feedback + event logging wired to real state (groundwork for `progression_events`, §4.2) | Phase 3 |
+| 5 | Server aggregation endpoints (§5.2) + client charts: strength progression, muscle volume, frequency heatmap, PRs (§5.3) | Phase 2 |
+| 6 | Plateau detection (§4.2): trend/trigger logic, `ProgressionPolicy` config, code split (§4.5), synthetic test suite (§4.6) before enabling | Phase 3, 4 |
+| 7 | REP_ADJUST / REVERSE / SWAPPED strategies on top of the Phase 6 signal, annotated on the Phase 5 charts via `progression_events` | Phase 6 |
+| 8 | Hardening: validation library, consistent response envelope, mass-assignment fix, pagination, CORS, broader test coverage | Independent — can run alongside 1–7 |
