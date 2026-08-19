@@ -2,7 +2,9 @@
 
 Scope: the recommendation/optimization engine and progress visualization — the two pieces of the product that don't exist yet — plus every other gap found while auditing the codebase. Basic CRUD (auth, goals, workout logging/history) already works end-to-end and is not re-documented here.
 
-> **Revision note**: updated after a design review. The roadmap now ships a simple end-to-end recommendation loop (selection + plain progressive overload) before plateau detection exists at all, so the architecture gets validated with real traffic before the harder algorithm is built on top of it. Progression state is event-sourced rather than overwrite-in-place, plateau thresholds are configurable instead of hardcoded, Redis is optional rather than a boot requirement, and plateau-logic tests move up next to the code instead of waiting for a general hardening phase.
+> **Revision note (2)**: updated after a second design review. Recommendations are now persisted records (§4.7) linked to the workouts actually logged against them, so the system can tell prescribed performance from actual performance — that link is what makes `completionRate` (§4.3) and real outcome analysis possible, not just estimated-1RM trend-watching. The state machine no longer resets to `NORMAL` on a single noisy improvement (§4.2). Exercise catalog entries no longer carry a fake default weight (§3). Basic request validation and mass-assignment protection move up to Phase 2.5 instead of waiting for general hardening.
+>
+> **Revision note (1)**: the roadmap ships a simple end-to-end recommendation loop (selection + plain progressive overload) before plateau detection exists at all, so the architecture gets validated with real traffic before the harder algorithm is built on top of it. Progression state is event-sourced rather than overwrite-in-place, plateau thresholds are configurable instead of hardcoded, Redis is optional rather than a boot requirement, and plateau-logic tests move up next to the code instead of waiting for a general hardening phase.
 
 ## 1. Architecture today
 
@@ -55,19 +57,20 @@ None of this is a "connect two working systems" job — it's building the missin
 **New collection `exercises`** (canonical catalog, seeded once):
 ```js
 { exerciseId: String (unique), name: String, primaryMuscle: String,
-  secondaryMuscles: [String], equipment: [String], tags: [String] /* goals */,
-  defaultWeightLbs: Number }
+  secondaryMuscles: [String], equipment: [String], tags: [String] /* goals */ }
 ```
+No `defaultWeightLbs` field — there's no meaningful default bench/squat/curl weight across a beginner and an advanced lifter; a fixed catalog default would just be wrong for most users. For an exercise the user has never logged, the MVP requires the user to enter a starting weight themselves rather than guessing one; a smarter cold-start (inferring from similar-exercise history or profile experience level) is a later refinement, not a Phase 2 requirement.
 
 **`historyModel.js` — `exercises` subdocument, replacing the untyped `Object`:**
 ```js
 exercises: [{
   exerciseId: { type: String, required: true },   // FK into exercises catalog
+  recommendationId: { type: String },               // set if this exercise came from a recommendation (§4.7); absent for freely-logged exercises
   name: String,                                     // denormalized for display
   sets: [{ reps: Number, weight: Number, weightUnit: { type: String, enum: ['lb','kg'], default: 'lb' }, notes: String }]
 }],
 ```
-Add `timestamps: true`. Coerce `reps`/`weight` to `Number` client-side before POST (`NewWorkout.js` currently sends raw input-`.value` strings).
+Add `timestamps: true`. Coerce `reps`/`weight` to `Number` client-side before POST (`NewWorkout.js` currently sends raw input-`.value` strings). `recommendationId` is what lets the system later compare *prescribed* sets/reps/weight (stored on the `recommendations` document, §4.7) against *actual* logged performance — without it, "did the user succeed" can only be inferred from raw trend-watching, which conflates "the user wasn't given this prescription" with "the user was given it and failed."
 
 **`profileModel.js`**: add `equipment: [String]` and `weightUnit`/`heightUnit` fields so the ml service's equipment filter and any future unit conversion have real data to read.
 
@@ -87,6 +90,7 @@ The first shippable slice is Selection + Prescription wired all the way through,
 
 ```json
 {
+  "recommendationId": "rec_8f2a...",
   "exercise": "Bench Press",
   "prescription": { "sets": 3, "reps": 5, "weight": 195, "unit": "lb" },
   "strategy": "NORMAL",
@@ -95,7 +99,7 @@ The first shippable slice is Selection + Prescription wired all the way through,
 }
 ```
 
-Adaptation later just starts populating `strategy` with `REP_ADJUST`/`REVERSE`/`SWAPPED` and writing a different `reason`/`change` — the client and the API contract don't change shape when plateau logic lands. This is why Phase 3 in the roadmap (§7) is "ship the simple loop end-to-end," not "build the plateau engine": it validates the client↔server↔ml wiring and the data model against real usage before the harder algorithm is built on top of assumptions no one has tested yet.
+Adaptation later just starts populating `strategy` with `REP_ADJUST`/`REVERSE`/`SWAPPED` and writing a different `reason`/`change` — the client and the API contract don't change shape when plateau logic lands. This is why Phase 3 in the roadmap (§7) is "ship the simple loop end-to-end," not "build the plateau engine": it validates the client↔server↔ml wiring and the data model against real usage before the harder algorithm is built on top of assumptions no one has tested yet. `recommendationId` is generated the moment this response is built (§4.7) — it's what the client sends back on `POST /feedback` and what `NewWorkout.js` attaches to a logged exercise if the user actually performs the suggestion.
 
 ### 4.1 What exists today (and its gap)
 
@@ -133,6 +137,7 @@ class ProgressionPolicy:
     stalls_before_intervention: int = 2
     rep_adjust_sessions: int = 2   # sessions to trial REP_ADJUST before trying REVERSE
     reverse_sessions: int = 2      # sessions to trial REVERSE before SWAPPED
+    improvements_before_reset: int = 2   # consecutive improved sessions required to drop back to NORMAL
 ```
 Keeping these as constructor parameters (not literals inside the detection function) means thresholds can be tuned — or made per-user/per-goal later — without touching the state-machine logic itself.
 
@@ -141,14 +146,14 @@ Keeping these as constructor parameters (not literals inside the detection funct
 ```
 NORMAL ──plateau──▶ REP_ADJUST ──still plateaued after rep_adjust_sessions──▶ REVERSE ──still plateaued after reverse_sessions──▶ SWAPPED
   ▲                     │                                                        │
-  └──── improvement resumes at any state ──────────────────────────────────────────┘
+  └──── improvements_before_reset consecutive improved sessions, from any state ───┘
 ```
 
 - **NORMAL**: current `apply_progression` behavior — small weight/rep increment session over session.
 - **REP_ADJUST**: lower target reps (e.g. −2 from the goal's rep range), raise weight (e.g. +5–10%). This replaces `apply_progression`'s flat increment for this exercise while in this state.
 - **REVERSE**: the opposite adjustment — raise reps (e.g. +3–4), lower weight back toward the pre-REP_ADJUST baseline. This is what "if that doesn't work, do the opposite" means concretely.
 - **SWAPPED**: stop recommending this exercise; call `candidate_pool()` filtered to the same `primaryMuscle` and excluding this `exerciseId`, and recommend a replacement. Keep `progression_state` for the original exercise (don't delete it — a user might return to it later) but mark it deprioritized so it isn't re-suggested immediately.
-- Any state resets to **NORMAL** the moment estimated 1RM improves beyond the threshold again. Every transition writes one `progression_events` document.
+- A non-`NORMAL` state resets to **NORMAL** only after `improvements_before_reset` *consecutive* improved sessions, not a single one. One 2.3%-better session right after switching to `REP_ADJUST` is barely evidence the new strategy worked — bouncing straight back to `NORMAL` on that alone would mean the state machine never actually tests an intervention before abandoning it. A single improvement still resets the stall counter (so the plateau doesn't re-trigger immediately), it just doesn't by itself flip the strategy back. Every transition writes one `progression_events` document.
 
 **Feedback loop wiring**: `POST /feedback` already accepts `action: accept | swap | thumbs_up | thumbs_down`. An explicit `swap` should immediately push that exercise's state forward one step (skip waiting for more stalled sessions) rather than only invalidating the cache as it does today — a user asking to swap is a stronger signal than a computed plateau.
 
@@ -156,7 +161,10 @@ NORMAL ──plateau──▶ REP_ADJUST ──still plateaued after rep_adjust_
 
 ### 4.3 Feature engineering work
 
-- Replace `success_rate()` stub with a real definition: fraction of an exercise's last N sessions where estimated 1RM improved over the prior session.
+- Replace the `success_rate()` stub with two separate signals, not one — they answer different questions and get conflated if merged:
+  - **`completionRate(username, exerciseId)`**: fraction of an exercise's last N *recommended* sessions (i.e. logged with a matching `recommendationId`, §4.7) where the user completed the prescribed sets/reps/weight. A session can complete-as-prescribed with zero estimated-1RM movement — e.g. two sessions in a row at `185×8×3, all sets completed` — and that's a successful, not a failed, session; it just isn't progression yet.
+  - **`progressionRate(username, exerciseId)`**: fraction of an exercise's last N sessions where estimated 1RM improved over the prior session — this is what §4.2's plateau trigger actually watches.
+  - `completionRate` needs the `recommendationId` link (§3, §4.7) to mean anything; it can't be computed from freely-logged exercises with no attached prescription.
 - Wire `build_user_vector()` (currently computed but never called) into `score_rules()` — bias candidate selection toward muscle groups underrepresented in recent volume, so recommendations balance a user's training rather than only optimizing per-exercise progression.
 - Add a `plateau_state(username, exerciseId)` accessor that the Prescription stage calls in place of the current unconditional `apply_progression()` call.
 
@@ -202,6 +210,34 @@ Build this alongside §4.2, not deferred to general hardening (§6/§7) — the 
 
 Aim for on the order of 20–30 scenarios (boundary cases around the session-count thresholds, not just the happy path) before enabling this in production — this is cheap to test exhaustively and expensive to get wrong silently.
 
+### 4.7 Recommendation record — closing the loop
+
+Nothing so far persists *what GymGenius actually told the user to do* — only the resulting state/events. Without that record, the system can only ever reason about logged workouts in isolation; it can't answer "did the user do what we suggested" or "how often does REP_ADJUST actually work." Add a `recommendations` collection, written once per `/recommend` call:
+
+```js
+recommendations {
+  recommendationId, username, createdAt,
+  items: [{ exerciseId, prescription, strategy, reason, change }],
+  context: { goal, equipment, policyVersion }
+}
+```
+
+`policyVersion` tags which `ProgressionPolicy` (§4.2) generated this recommendation, so a future policy-tuning change doesn't retroactively corrupt analysis of past recommendations. The loop this closes:
+
+```
+recommendation ──user logs a workout with matching recommendationId (§3)──▶ actual performance
+      │                                                                            │
+      └──────────────────── compare prescribed vs. actual ◀───────────────────────┘
+                                        │
+                                        ▼
+                          completionRate / progressionRate (§4.3)
+                                        │
+                                        ▼
+                    "does REP_ADJUST actually work for this user/goal?"
+```
+
+That last question — measuring whether a *strategy*, not just an exercise, tends to work — is what makes this an optimization system rather than a workout generator with an opinion. It's not needed for §4.0's MVP loop or even for §4.2's plateau detection to function; it's what turns the accumulated history into something the system can learn from later (e.g. tuning `ProgressionPolicy` per goal from observed `REP_ADJUST` success rates). Build it in Phase 4 (§7) — right after the MVP loop ships and before plateau detection needs something to measure its own effectiveness against.
+
 ## 5. Progress visualization
 
 Nothing exists yet: no charting library in `client/package.json`, no chart code on any page, no server aggregation endpoints to feed one.
@@ -232,8 +268,8 @@ A "Progress" tab/page, plus a recommendation surface on the Dashboard:
 ## 6. Other issues found (not blocking, but should be tracked)
 
 - **Response-shape inconsistency**: most controllers return `{success, data|message}`; `authController` returns bare `{token,user}` or `{error}` (different key, no `success`). Pick one envelope.
-- **Mass assignment**: `historyController.updateWorkout` passes the entire raw request body into `findOneAndUpdate` with no field whitelist — a client could attempt to overwrite `username`/`_id`.
-- **No request validation anywhere** in `server/controllers` — no joi/zod/express-validator; Mongoose schema validators are the only line of defense, and their errors (e.g. raw Mongo duplicate-key messages) leak to the client as-is via generic `500` catches.
+- **Mass assignment**: `historyController.updateWorkout` passes the entire raw request body into `findOneAndUpdate` with no field whitelist — a client could attempt to overwrite `username`/`_id`. *(Addressed for the endpoints under active change in Phase 2.5, §7; remaining routes covered in Phase 8.)*
+- **No request validation anywhere** in `server/controllers` — no joi/zod/express-validator; Mongoose schema validators are the only line of defense, and their errors (e.g. raw Mongo duplicate-key messages) leak to the client as-is via generic `500` catches. *(Same — Phase 2.5 covers workout/recommendation endpoints first, since those are the ones about to change shape; the rest is Phase 8.)*
 - **Race condition**: `goalController.createGoal` checks-then-creates instead of using a unique compound index on `(username, weekStart)`.
 - **CORS**: `app.use(cors())` with no options — allows all origins.
 - **Pagination**: `History.js` requests `?page&limit`; `historyController.getAllWorkouts` ignores both and returns the full unpaginated collection every time.
@@ -251,10 +287,11 @@ Ordered so the architecture gets proven with a simple recommendation loop before
 |---|---|---|
 | 0 | Security hygiene: stop tracking `config.env`, add `config.env.example` | — *(done in this change)* |
 | 1 | Fix ml service boot defects (§4.4); make `/healthz`/`/readyz` actually pass; Redis optional via `CACHE_ENABLED` | Phase 0 |
-| 2 | Data model: exercise catalog + `historyModel` typed fields + repoint ml at real collections (§3) | Phase 1 |
-| 3 | Ship the MVP loop end-to-end (§4.0): Selection (`score_rules`) + plain Prescription (`apply_progression`), `strategy`/`reason`/`change` response shape, client calls `/recommendation` and renders the suggestion with feedback controls | Phase 2 |
-| 4 | Recommendation feedback + event logging wired to real state (groundwork for `progression_events`, §4.2) | Phase 3 |
+| 2 | Data model: exercise catalog + `historyModel` typed fields (incl. `recommendationId`) + repoint ml at real collections (§3) | Phase 1 |
+| 2.5 | Request validation + mass-assignment fix on the endpoints about to see real new traffic: workout create/update, `/recommendation`, `/recommendation/feedback` (pulled forward from §6/§8 — cheaper to establish the boundary now than to debug schema changes against an unvalidated API) | Phase 2 |
+| 3 | Ship the MVP loop end-to-end (§4.0): Selection (`score_rules`) + plain Prescription (`apply_progression`), `strategy`/`reason`/`change` response shape, client calls `/recommendation` and renders the suggestion with feedback controls | Phase 2.5 |
+| 4 | Recommendation instrumentation (§4.7): persist the `recommendations` collection, wire `recommendationId` from suggestion through to a logged workout, real event logging (groundwork for `progression_events`, §4.2) | Phase 3 |
 | 5 | Server aggregation endpoints (§5.2) + client charts: strength progression, muscle volume, frequency heatmap, PRs (§5.3) | Phase 2 |
-| 6 | Plateau detection (§4.2): trend/trigger logic, `ProgressionPolicy` config, code split (§4.5), synthetic test suite (§4.6) before enabling | Phase 3, 4 |
+| 6 | Plateau detection (§4.2): trend/trigger logic, `completionRate`/`progressionRate` (§4.3), `ProgressionPolicy` config, code split (§4.5), synthetic test suite (§4.6) before enabling | Phase 3, 4 |
 | 7 | REP_ADJUST / REVERSE / SWAPPED strategies on top of the Phase 6 signal, annotated on the Phase 5 charts via `progression_events` | Phase 6 |
-| 8 | Hardening: validation library, consistent response envelope, mass-assignment fix, pagination, CORS, broader test coverage | Independent — can run alongside 1–7 |
+| 8 | Broader hardening: consistent response envelope, remaining pagination/CORS gaps, integration test coverage | Independent — can run alongside 1–7 |
