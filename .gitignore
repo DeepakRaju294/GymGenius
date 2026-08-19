@@ -1,0 +1,134 @@
+# --- OS & IDE junk ---
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.iml
+
+# --- Env files ---
+**/.env
+**/.env.*
+**/config.env
+!**/.env.example
+!**/.env.*.example
+!**/config.env.example
+
+# --- JWT / secrets / keys ---
+secrets/
+**/*.pem
+**/*.key
+**/*.p12
+**/*.crt
+**/*.keystore
+**/*.jks
+**/jwks.json
+
+# --- Node / React ---
+**/node_modules/
+**/.pnp
+**/.pnp.js
+**/.eslintcache
+**/.stylelintcache
+**/.cache/
+**/.parcel-cache/
+**/.turbo/
+**/.vite/
+**/.next/
+**/out/
+**/storybook-static/
+**/coverage/
+**/.nyc_output/
+**/*.tsbuildinfo
+
+# --- Build outputs (any package) ---
+**/build/
+**/dist/
+
+# --- Logs & temp ---
+**/logs/
+**/*.log
+**/tmp/
+tmp/
+
+# --- Database dumps ---
+**/dump/
+**/*.dump
+**/*.sql
+**/*.bson
+**/*.archive
+
+# --- Docker / compose scratch ---
+docker-compose.override.yml
+**/.docker/
+**/redis_data/
+**/mongo_data/
+**/postgres_data/
+
+# --- Python (AI service) ---
+**/__pycache__/
+**/*.py[cod]
+**/*.so
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/.ipynb_checkpoints/
+**/.coverage
+**/.coverage.*
+**/htmlcov/
+**/.python-version
+
+# Virtualenvs
+**/.venv/
+**/venv/
+**/env/
+**/ENV/
+**/venv.bak/
+**/env.bak/
+
+# Packaging / wheels
+.eggs/
+*.egg-info/
+pip-wheel-metadata/
+wheels/
+build/
+dist/
+MANIFEST
+downloads/
+
+# --- Notebooks (scratch artifacts) ---
+*.ipynb~
+.ipynb_checkpoints/
+
+# --- Data & ML artifacts ---
+# Ignore raw/generated data by default, keep curated seeds
+**/data/**
+!**/data/.gitkeep
+
+# Model/binary artifacts 
+**/*.pkl
+**/*.joblib
+**/*.pt
+**/*.pth
+**/*.onnx
+**/*.h5
+artifacts/
+checkpoints/
+app/models/checkpoints/*
+!app/models/checkpoints/.gitkeep
+
+# --- Reports / generated assets ---
+reports/
+prof/
+*.prof
+*.lprof
+generated/
+*.svg
+*.png
