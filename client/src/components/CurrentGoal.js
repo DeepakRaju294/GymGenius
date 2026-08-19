@@ -40,6 +40,10 @@ export default function CurrentGoal({ onChange, goal }) {
       }
     };
     fetchGoal();
+    // Runs once on mount only - `onChange` is Dashboard's setState setter passed
+    // down fresh each render; depending on it here would refetch on every parent
+    // re-render instead of once when this card mounts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleSaveGoal = async () => {

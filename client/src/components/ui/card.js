@@ -24,13 +24,15 @@ const CardHeader = React.forwardRef(function CardHeader({ className, ...props },
   );
 });
 
-const CardTitle = React.forwardRef(function CardTitle({ className, ...props }, ref) {
+const CardTitle = React.forwardRef(function CardTitle({ className, children, ...props }, ref) {
   return (
     <h3
       ref={ref}
       className={cn("text-lg font-semibold leading-none tracking-tight", className)}
       {...props}
-    />
+    >
+      {children}
+    </h3>
   );
 });
 

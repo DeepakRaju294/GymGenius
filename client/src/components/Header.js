@@ -5,13 +5,21 @@ export default function Header() {
   return (
     <header className="w-full bg-gradient-to-r from-[#0b0f14] via-[#101418] to-[#0b0f14] text-white border-b border-white/10 py-4 px-6 flex items-center justify-between font-sans">
 
-      <Link
-        to="/history"
-        className="opacity-80 hover:opacity-100 transition duration-150"
-        aria-label="View workout history"
-      >
-        <img src="/History.png" alt="History" className="w-10 h-10" />
-      </Link>
+      <div className="flex items-center gap-4">
+        <Link
+          to="/history"
+          className="opacity-80 hover:opacity-100 transition duration-150"
+          aria-label="View workout history"
+        >
+          <img src="/History.png" alt="History" className="w-10 h-10" />
+        </Link>
+        <Link
+          to="/progress"
+          className="text-sm font-semibold text-[#8fb0ff] opacity-80 hover:opacity-100 transition duration-150"
+        >
+          Progress
+        </Link>
+      </div>
 
       <div className="text-center">
           <img

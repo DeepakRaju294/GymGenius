@@ -1,5 +1,5 @@
 import { React, useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 
 export default function NewWorkout() {
@@ -7,8 +7,16 @@ export default function NewWorkout() {
   const [exercises, setExercises] = useState([]);
   const [workoutFocus, setWorkoutFocus] = useState('');
   const [goalText, setGoalText] = useState('');
+  const [catalog, setCatalog] = useState([]);
+  const [selectedExerciseId, setSelectedExerciseId] = useState('');
 
   const navigate = useNavigate();
+  const location = useLocation();
+
+  const authHeaders = () => {
+    const token = localStorage.getItem('token');
+    return { Authorization: `Bearer ${token}` };
+  };
 
   useEffect(() => {
     const fetchWeeklyGoal = async () => {
@@ -23,7 +31,7 @@ export default function NewWorkout() {
         startOfWeek.setHours(0, 0, 0, 0);
 
         const response = await axios.get('http://localhost:5000/api/v1/goal', {
-          headers: { Authorization: `Bearer ${token}` },
+          headers: authHeaders(),
           params: { weekStart: startOfWeek }
         });
 
@@ -37,9 +45,47 @@ export default function NewWorkout() {
       }
     };
 
+    const fetchCatalog = async () => {
+      try {
+        const response = await axios.get('http://localhost:5000/api/v1/exercises', {
+          headers: authHeaders()
+        });
+        const list = response.data?.data?.exercises || [];
+        setCatalog(list);
+        if (list.length && !selectedExerciseId) setSelectedExerciseId(list[0].exerciseId);
+      } catch (err) {
+        console.error('Failed to load exercise catalog:', err.response?.data || err.message);
+      }
+    };
+
     fetchWeeklyGoal();
+    fetchCatalog();
+
+    // Pre-fill from a recommendation the user chose to start (Dashboard "Start This Workout").
+    const state = location.state;
+    if (state?.recommendedExercises?.length) {
+      setExercises(
+        state.recommendedExercises.map((item) => ({
+          exerciseId: item.exerciseId,
+          name: item.exercise,
+          recommendationId: state.recommendationId,
+          recommendationItemId: item.recommendationItemId,
+          sets: [
+            {
+              reps: String(item.prescription.reps),
+              weight: item.prescription.weight > 0 ? String(item.prescription.weight) : '',
+              weightUnit: item.prescription.unit || 'lb',
+              notes: ''
+            }
+          ]
+        }))
+      );
+      if (!workoutFocus) setWorkoutFocus('Recommended session');
+    }
+
     const interval = setInterval(() => setTime(t => t + 1), 1000);
     return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function convertTime(totalSeconds) {
@@ -53,18 +99,24 @@ export default function NewWorkout() {
   }
 
   const addExercise = () => {
-    setExercises([...exercises, { name: '', sets: [] }]);
-  };
-
-  const handleExerciseNameChange = (index, value) => {
-    const updated = [...exercises];
-    updated[index].name = value;
-    setExercises(updated);
+    const catalogEntry = catalog.find(ex => ex.exerciseId === selectedExerciseId);
+    if (!catalogEntry) {
+      alert('Pick an exercise first.');
+      return;
+    }
+    setExercises([
+      ...exercises,
+      {
+        exerciseId: catalogEntry.exerciseId,
+        name: catalogEntry.name,
+        sets: [{ reps: '', weight: '', weightUnit: 'lb', notes: '' }]
+      }
+    ]);
   };
 
   const addSet = exerciseIndex => {
     const updated = [...exercises];
-    updated[exerciseIndex].sets.push({ reps: '', weight: '', notes: '' });
+    updated[exerciseIndex].sets.push({ reps: '', weight: '', weightUnit: 'lb', notes: '' });
     setExercises(updated);
   };
 
@@ -92,27 +144,47 @@ export default function NewWorkout() {
         return;
       }
 
-      const token = localStorage.getItem('token');
+      const preparedExercises = [];
+      for (const ex of exercises) {
+        if (!ex.sets.length) {
+          alert(`${ex.name} needs at least one set.`);
+          return;
+        }
+        const sets = [];
+        for (const s of ex.sets) {
+          const reps = Number(s.reps);
+          const weight = Number(s.weight);
+          if (!Number.isFinite(reps) || reps < 0 || !Number.isFinite(weight) || weight < 0) {
+            alert(`${ex.name} has a set with a missing or invalid reps/weight value.`);
+            return;
+          }
+          sets.push({ reps, weight, weightUnit: s.weightUnit || 'lb', notes: s.notes || '' });
+        }
+        preparedExercises.push({
+          exerciseId: ex.exerciseId,
+          name: ex.name,
+          recommendationId: ex.recommendationId,
+          recommendationItemId: ex.recommendationItemId,
+          sets
+        });
+      }
 
       const workoutData = {
         goalText,
         workoutFocus,
         workoutDate: new Date(),
         workoutDuration: Math.floor(time / 60),
-        exercises
+        exercises: preparedExercises
       };
 
       await axios.post('http://localhost:5000/api/v1/history', workoutData, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
+        headers: { ...authHeaders(), 'Content-Type': 'application/json' }
       });
       alert('Workout saved!');
       navigate('/dashboard');
     } catch (err) {
       console.error('Failed to save workout:', err.response?.data || err.message);
-      alert('Failed to save workout.');
+      alert(err.response?.data?.message || 'Failed to save workout.');
     }
   };
 
@@ -147,14 +219,14 @@ export default function NewWorkout() {
       <div className="mx-auto w-full max-w-3xl space-y-6">
         {exercises.map((exercise, exIndex) => (
           <div key={exIndex} className="rounded-[20px] border border-white/10 bg-white/5 backdrop-blur p-6 shadow-[0_20px_60px_-20px_rgba(0,0,0,0.6)] space-y-4">
-            <input
-              type="text"
-              placeholder="Exercise Name"
-              value={exercise.name}
-              onChange={e => handleExerciseNameChange(exIndex, e.target.value)}
-              className={inputBase}
-              required
-            />
+            <div className="flex items-center justify-between gap-3">
+              <h4 className="font-semibold text-[#cfe0ff]">{exercise.name}</h4>
+              {exercise.recommendationItemId && (
+                <span className="text-xs uppercase tracking-wide text-[#7fd39a] bg-[#7fd39a]/10 border border-[#7fd39a]/30 rounded-full px-2 py-0.5">
+                  Recommended
+                </span>
+              )}
+            </div>
 
             <div className="space-y-3">
               {exercise.sets.map((set, setIndex) => (
@@ -164,9 +236,17 @@ export default function NewWorkout() {
                     placeholder="Weight"
                     value={set.weight}
                     onChange={e => handleSetChange(exIndex, setIndex, 'weight', e.target.value)}
-                    className={`${inputBase} w-28`}
+                    className={`${inputBase} w-24`}
                     required
                   />
+                  <select
+                    value={set.weightUnit}
+                    onChange={e => handleSetChange(exIndex, setIndex, 'weightUnit', e.target.value)}
+                    className={`${inputBase} w-20 appearance-none`}
+                  >
+                    <option value="lb" className="bg-[#0e141a]">lb</option>
+                    <option value="kg" className="bg-[#0e141a]">kg</option>
+                  </select>
                   <input
                     type="number"
                     placeholder="Reps"
@@ -209,12 +289,26 @@ export default function NewWorkout() {
           </div>
         ))}
 
-        <button
-          onClick={addExercise}
-          className="w-full bg-blue-900 hover:bg-blue-950 text-white/80 px-6 py-3 rounded-xl font-semibold shadow-[0_10px_28px_-10px_rgba(35,80,220,0.25)] transition-colors"
-        >
-          + Add Exercise
-        </button>
+        <div className="rounded-[20px] border border-white/10 bg-white/5 backdrop-blur p-4 flex flex-wrap items-center gap-3">
+          <select
+            value={selectedExerciseId}
+            onChange={e => setSelectedExerciseId(e.target.value)}
+            className={`${inputBase} flex-1 min-w-[200px] appearance-none`}
+          >
+            {catalog.length === 0 && <option value="">Loading exercises...</option>}
+            {catalog.map(ex => (
+              <option key={ex.exerciseId} value={ex.exerciseId} className="bg-[#0e141a]">
+                {ex.name}
+              </option>
+            ))}
+          </select>
+          <button
+            onClick={addExercise}
+            className="bg-blue-900 hover:bg-blue-950 text-white/80 px-6 py-3 rounded-xl font-semibold shadow-[0_10px_28px_-10px_rgba(35,80,220,0.25)] transition-colors"
+          >
+            + Add Exercise
+          </button>
+        </div>
 
         <button
           onClick={handleEndWorkout}

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import Header from "../components/Header";
 import StartWorkout from "../components/StartWorkout";
 import CurrentGoal from "../components/CurrentGoal";
+import RecommendationCard from "../components/RecommendationCard";
 import axios from "axios";
 
 export default function Dashboard() {
@@ -96,6 +97,7 @@ export default function Dashboard() {
 
       <main className="mx-auto w-full max-w-4xl px-6 pt-16 pb-24 flex flex-col items-center gap-12 relative z-10">
         <StartWorkout />
+        <RecommendationCard />
         <CurrentGoal goal={goal} onChange={handleGoalChange} />
       </main>
     </div>

@@ -15,6 +15,18 @@ export default function Profile() {
     "Weight": "",
     "Height": "",
   });
+  const [weightUnit, setWeightUnit] = useState("lb");
+  const [heightUnit, setHeightUnit] = useState("in");
+  const [equipment, setEquipment] = useState([]);
+
+  const EQUIPMENT_OPTIONS = ['barbell', 'dumbbell', 'bench', 'cable', 'machine', 'bodyweight'];
+
+  const toggleEquipment = (item) => {
+    if (!editable) return;
+    setEquipment((prev) =>
+      prev.includes(item) ? prev.filter((e) => e !== item) : [...prev, item]
+    );
+  };
 
   useEffect(() => {
     const fetchProfile = async () => {
@@ -34,6 +46,9 @@ export default function Profile() {
           "Weight": p.weight ?? "",
           "Height": p.height ?? "",
         });
+        setWeightUnit(p.weightUnit || "lb");
+        setHeightUnit(p.heightUnit || "in");
+        setEquipment(Array.isArray(p.equipment) ? p.equipment : []);
       } catch (err) {
         console.error("Error fetching profile:", err.response?.data || err.message);
         alert("Could not load profile.");
@@ -56,9 +71,12 @@ export default function Profile() {
         lastName:    userInfo["Last Name"],
         email:       userInfo["Email"],
         gender:      userInfo["Gender"], 
-        fitnessGoal: userInfo["Fitness Goal"],  
+        fitnessGoal: userInfo["Fitness Goal"],
         weight:      userInfo["Weight"],
+        weightUnit,
         height:      userInfo["Height"],
+        heightUnit,
+        equipment,
       };
       await axios.patch("http://localhost:5000/api/v1/profile", payload, {
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, 
@@ -196,9 +214,9 @@ export default function Profile() {
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-4 mb-5">
+          <div className="grid grid-cols-2 gap-4 mb-4">
             <div>
-              <label className="block text-xs font-semibold text-[#b9c7da] mb-1.5">Weight</label>
+              <label className="block text-xs font-semibold text-[#b9c7da] mb-1.5">Weight ({weightUnit})</label>
               <input
                 type="number"
                 inputMode="decimal"
@@ -211,7 +229,7 @@ export default function Profile() {
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-[#b9c7da] mb-1.5">Height</label>
+              <label className="block text-xs font-semibold text-[#b9c7da] mb-1.5">Height ({heightUnit})</label>
               <input
                 type="number"
                 inputMode="decimal"
@@ -223,6 +241,32 @@ export default function Profile() {
                 placeholder=""
               />
             </div>
+          </div>
+
+          <div className="mb-5">
+            <label className="block text-xs font-semibold text-[#b9c7da] mb-1.5">
+              Equipment you have access to
+            </label>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+              {EQUIPMENT_OPTIONS.map((item) => (
+                <label
+                  key={item}
+                  className={`flex items-center gap-2 rounded-lg border border-white/10 bg-[#0e141a]/70 px-3 py-2 text-sm text-[#dbe7ff] capitalize ${editable ? "cursor-pointer" : "opacity-70 cursor-not-allowed"}`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={equipment.includes(item)}
+                    onChange={() => toggleEquipment(item)}
+                    disabled={!editable}
+                    className="accent-[#3d63e3]"
+                  />
+                  {item}
+                </label>
+              ))}
+            </div>
+            <p className="text-xs text-[#9fb0c9] mt-1.5">
+              Your recommendations are filtered to exercises you can actually do with this equipment.
+            </p>
           </div>
 
           <button

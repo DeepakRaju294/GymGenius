@@ -90,7 +90,7 @@ export default function History() {
           <div key={i} className="text-sm text-[#dbe7ff]/90 flex items-center gap-2">
             <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#3d63e3]/80 shadow-[0_0_8px_1px_rgba(61,99,227,0.5)]" />
             <span>
-              Set {i + 1}: {set.reps || 0} reps × {set.weight || 0} kg
+              Set {i + 1}: {set.reps || 0} reps × {set.weight || 0} {set.weightUnit || 'lb'}
               {set.notes && <span className="text-[#9fb0c9]/70 ml-2">({set.notes})</span>}
             </span>
           </div>

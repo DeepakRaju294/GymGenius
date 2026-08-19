@@ -28,3 +28,9 @@ exports.login = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+
+exports.logout = async (req, res) => {
+  // Stateless JWT - there is nothing to invalidate server-side. This exists so the
+  // client has a real endpoint to call instead of only clearing localStorage.
+  res.status(200).json({ message: 'Logged out' });
+};

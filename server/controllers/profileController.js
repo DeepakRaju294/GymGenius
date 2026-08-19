@@ -19,7 +19,7 @@ exports.getProfile = async (req, res) => {
 
 exports.createProfile = async (req, res) => {
     try{
-        const {firstName, lastName, email, gender, fitnessGoal, weight, height} = req.body;
+        const {firstName, lastName, email, gender, fitnessGoal, weight, weightUnit, height, heightUnit, equipment} = req.body;
         const existingProfile = await Profile.findOne({username: req.user.username});
         if (existingProfile) {
             return res.status(400).json({
@@ -27,7 +27,7 @@ exports.createProfile = async (req, res) => {
                 message: 'Profile already exists for this user'
             });
         }
-        const profile = await Profile.create({username: req.user.username, firstName, lastName, email, gender, fitnessGoal, weight, height});
+        const profile = await Profile.create({username: req.user.username, firstName, lastName, email, gender, fitnessGoal, weight, weightUnit, height, heightUnit, equipment});
         res.status(201).json({
             success: true,
             data: {profile}
@@ -44,8 +44,8 @@ exports.createProfile = async (req, res) => {
 
 exports.updateProfile = async (req, res) => {
     try{
-        const {firstName, lastName, email, gender, fitnessGoal, weight, height} = req.body;
-        const profile = await Profile.findOneAndUpdate({ username: req.user.username }, {firstName, lastName, email, gender, fitnessGoal, weight, height}, {new: true, runValidators: true});
+        const {firstName, lastName, email, gender, fitnessGoal, weight, weightUnit, height, heightUnit, equipment} = req.body;
+        const profile = await Profile.findOneAndUpdate({ username: req.user.username }, {firstName, lastName, email, gender, fitnessGoal, weight, weightUnit, height, heightUnit, equipment}, {new: true, runValidators: true});
         res.status(200).json({
             success: true,
             data: profile

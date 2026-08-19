@@ -26,9 +26,9 @@ def mongo() -> Database:
             return _db
         _client = MongoClient(
             MONGO_URI,
-            serverSelectionTimeoutMS=500,  
-            connectTimeoutMS=500,
-            socketTimeoutMS=1000,
+            serverSelectionTimeoutMS=1500,
+            connectTimeoutMS=1500,
+            socketTimeoutMS=2000,
             retryWrites=True,
         )
         _db = _client[MONGO_DB]
@@ -40,21 +40,25 @@ def get_collection(name: str) -> Collection:
 
 
 def mongo_ping() -> dict:
-    
     try:
         return mongo().command("ping")
     except PyMongoError as e:
         raise e
 
-def ensure_basic_indexes() -> None:
-    """
-    db = mongo()
+
+def ensure_indexes() -> None:
+    """Create the indexes documented in docs/SPEC.md §3. Idempotent - safe to call
+    on every startup. mongo() is deliberately called INSIDE the try block: for a
+    `mongodb+srv://` URI its constructor eagerly resolves DNS, and that failure
+    must not prevent the app from finishing startup (see Recommender.db)."""
     try:
-        db.workouts.create_index([("username", 1), ("ts", -1)])
-        db.profiles.create_index([("username", 1)], unique=True)
-        db.events.create_index([("username", 1), ("ts", -1)])
-        db.rec_feedback.create_index([("username", 1), ("ts", -1)])
-        db.exercises.create_index([("name", 1)])
+        db = mongo()
+        db.exercises.create_index("exerciseId", unique=True)
+        db.histories.create_index([("username", 1), ("workoutDate", -1)])
+        db.profiles.create_index("username", unique=True)
+        db.progression_state.create_index([("username", 1), ("exerciseId", 1)], unique=True)
+        db.progression_events.create_index([("username", 1), ("exerciseId", 1), ("ts", -1)])
+        db.recommendations.create_index("recommendationId", unique=True)
+        db.recommendations.create_index([("username", 1), ("createdAt", -1)])
     except PyMongoError:
-    """
-    pass
+        pass

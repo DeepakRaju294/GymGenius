@@ -10,8 +10,22 @@ export default function Login() {
     gender: '',
     fitnessGoal: '',
     weight: '',
-    height: ''
+    weightUnit: 'lb',
+    height: '',
+    heightUnit: 'in',
+    equipment: []
   });
+
+  const EQUIPMENT_OPTIONS = ['barbell', 'dumbbell', 'bench', 'cable', 'machine', 'bodyweight'];
+
+  const toggleEquipment = (item) => {
+    setProfile(prev => ({
+      ...prev,
+      equipment: prev.equipment.includes(item)
+        ? prev.equipment.filter(e => e !== item)
+        : [...prev.equipment, item]
+    }));
+  };
 
   const [step, setStep] = useState(1);
   const [error, setError] = useState('');
@@ -204,9 +218,9 @@ export default function Login() {
                 />
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-[#b9c7da] mb-1.5">Weight (lb)</label>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="col-span-1">
+                  <label className="block text-xs font-semibold text-[#b9c7da] mb-1.5">Weight</label>
                   <input
                     name="weight"
                     type="number"
@@ -216,8 +230,20 @@ export default function Login() {
                     required
                   />
                 </div>
-                <div>
-                  <label className="block text-xs font-semibold text-[#b9c7da] mb-1.5">Height (in)</label>
+                <div className="col-span-1">
+                  <label className="block text-xs font-semibold text-[#b9c7da] mb-1.5">Unit</label>
+                  <select
+                    name="weightUnit"
+                    value={profile.weightUnit}
+                    onChange={(e) => handleChange(e, setProfile)}
+                    className={`${inputBase} appearance-none pr-8`}
+                  >
+                    <option value="lb" className="bg-[#0e141a]">lb</option>
+                    <option value="kg" className="bg-[#0e141a]">kg</option>
+                  </select>
+                </div>
+                <div className="col-span-1">
+                  <label className="block text-xs font-semibold text-[#b9c7da] mb-1.5">Height</label>
                   <input
                     name="height"
                     type="number"
@@ -227,6 +253,43 @@ export default function Login() {
                     required
                   />
                 </div>
+                <div className="col-span-1">
+                  <label className="block text-xs font-semibold text-[#b9c7da] mb-1.5">Unit</label>
+                  <select
+                    name="heightUnit"
+                    value={profile.heightUnit}
+                    onChange={(e) => handleChange(e, setProfile)}
+                    className={`${inputBase} appearance-none pr-8`}
+                  >
+                    <option value="in" className="bg-[#0e141a]">in</option>
+                    <option value="cm" className="bg-[#0e141a]">cm</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-[#b9c7da] mb-1.5">
+                  Equipment you have access to
+                </label>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                  {EQUIPMENT_OPTIONS.map((item) => (
+                    <label
+                      key={item}
+                      className="flex items-center gap-2 rounded-lg border border-white/10 bg-[#0e141a]/70 px-3 py-2 text-sm text-[#dbe7ff] capitalize cursor-pointer"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={profile.equipment.includes(item)}
+                        onChange={() => toggleEquipment(item)}
+                        className="accent-[#3d63e3]"
+                      />
+                      {item}
+                    </label>
+                  ))}
+                </div>
+                <p className="text-xs text-[#9fb0c9] mt-1.5">
+                  This is what your recommendations will be filtered to - you can change it later in your profile.
+                </p>
               </div>
             </div>
           )}

@@ -36,9 +36,23 @@ const profileSchema = new mongoose.Schema({
         type: Number,
         required: true
     },
+    weightUnit: {
+        type: String,
+        enum: ['lb', 'kg'],
+        default: 'lb'
+    },
     height: {
         type: Number,
         required: true
+    },
+    heightUnit: {
+        type: String,
+        enum: ['in', 'cm'],
+        default: 'in'
+    },
+    equipment: {
+        type: [String],
+        default: []
     }
 });
 

@@ -1,15 +1,27 @@
 import os
+
+from dotenv import load_dotenv
+
+load_dotenv()  # picks up ml/.env in local dev; a real deployment sets these directly
+
 from fastapi import FastAPI, HTTPException, Response
 
-from app.api.schemas import RecommendRequest, RecommendResponse, FeedbackRequest
+from app.api.schemas import FeedbackRequest, RecommendRequest, RecommendResponse
 from app.services.recommender import Recommender
-from app.util.db import mongo_ping
-from app.util.cache import redis_ping
+from app.utils.cache import redis_ping
+from app.utils.db import ensure_indexes, mongo_ping
 
 APP_NAME = os.getenv("SERVICE_NAME", "recommender")
 BUILD_SHA = os.getenv("BUILD_SHA", "dev")
 
 app = FastAPI(title="GymGenius Recommender", version=BUILD_SHA)
+recommender = Recommender()
+
+
+@app.on_event("startup")
+def _startup() -> None:
+    ensure_indexes()
+
 
 @app.get("/healthz")
 def healthz():
@@ -24,7 +36,8 @@ def readyz():
     except Exception:
         checks["mongo"] = "fail"
     try:
-        redis_ping()
+        if not redis_ping():
+            checks["redis"] = "fail"
     except Exception:
         checks["redis"] = "fail"
 
@@ -36,12 +49,7 @@ def readyz():
 @app.post("/recommend", response_model=RecommendResponse)
 def recommend(req: RecommendRequest):
     try:
-        return recommender.recommend(
-            username=req.username,
-            goal=req.goal,
-            focus=req.workoutFocus,
-            topn=6,
-        )
+        return recommender.recommend(username=req.username, goal=req.goal, focus=req.workoutFocus, topn=6)
     except Exception:
         raise HTTPException(status_code=500, detail="failed to generate recommendations")
 

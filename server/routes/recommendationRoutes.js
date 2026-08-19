@@ -1,33 +1,31 @@
 const express = require("express");
 const axios = require("axios");
+const authMiddleware = require("../middleware/authMiddleware");
+const { validateRecommendationRequest, validateFeedbackRequest } = require("../middleware/validate");
 
 const router = express.Router();
 const REC_URL = process.env.REC_URL || "http://localhost:8000";
 
-function getUsername(req) {
-  return req.user?.username || req.body?.username;
-}
-
-router.post("/", async (req, res) => {
+router.post("/", authMiddleware, validateRecommendationRequest, async (req, res) => {
   try {
-    const username = getUsername(req);
+    const username = req.user.username;
     const { goal, workoutFocus } = req.body || {};
-    const { data } = await axios.post(`${REC_URL}/recommend`, { username, goal, workoutFocus }, { timeout: 800 });
+    const { data } = await axios.post(`${REC_URL}/recommend`, { username, goal, workoutFocus }, { timeout: 2000 });
     res.json({ success: true, data });
-  } catch {
+  } catch (err) {
     res.status(502).json({ success: false, message: "Recommender unavailable" });
   }
 });
 
-router.post("/feedback", async (req, res) => {
+router.post("/feedback", authMiddleware, validateFeedbackRequest, async (req, res) => {
   try {
-    const username = getUsername(req);
-    const { recId, exerciseId, action, reason } = req.body || {};
-    await axios.post(`${REC_URL}/feedback`, { recId, username, exerciseId, action, reason }, { timeout: 500 });
+    const username = req.user.username;
+    const { recommendationId, recommendationItemId, action, reason } = req.body || {};
+    await axios.post(`${REC_URL}/feedback`, { recommendationId, recommendationItemId, username, action, reason }, { timeout: 1000 });
     res.status(204).end();
-  } catch {
+  } catch (err) {
     res.status(202).end();
   }
 });
 
-module.exports = router;   
+module.exports = router;

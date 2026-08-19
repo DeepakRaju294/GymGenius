@@ -17,6 +17,10 @@ const goalSchema = new mongoose.Schema({
     },
 });
 
+// Enforce one goal per user per week at the database level - createGoal's
+// check-then-create was otherwise a race condition (docs/SPEC.md §6).
+goalSchema.index({ username: 1, weekStart: 1 }, { unique: true });
+
 const Goal = mongoose.model('Goal', goalSchema);
 
 module.exports = Goal;
