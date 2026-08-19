@@ -112,7 +112,7 @@ downloads/
 **/data/**
 !**/data/.gitkeep
 
-# Model/binary artifacts 
+# Model/binary artifacts
 **/*.pkl
 **/*.joblib
 **/*.pt
