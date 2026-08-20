@@ -17,7 +17,7 @@ from typing import Tuple
 import numpy as np
 import pandas as pd
 
-DATASET_PATH = Path(__file__).resolve().parent / "datasets" / "gym_members_exercise.csv"
+DATASET_PATH = Path(__file__).resolve().parent / "datasets" / "_src" / "gym_members_exercise" / "gym_members_exercise_tracking.csv"
 WORKOUT_TYPES = ["Cardio", "Strength", "HIIT", "Yoga"]
 
 RAW_TO_CANONICAL = {

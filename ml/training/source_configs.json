@@ -1,48 +1,51 @@
 {
-  "_comment": "Per-dataset column mapping (raw CSV column -> canonical field). Column names for 3 of these 4 datasets are BEST GUESSES based on common Kaggle exercise-dataset conventions - none have been downloaded/inspected yet (no Kaggle token configured as of writing this). `columnsVerified: false` means: before running ingest_exercise_catalog.py for real, run `python inspect_columns.py <file.csv>` on the actual downloaded file and fix `rawColumns` below to match. The pipeline SKIPS any source whose file isn't present in ml/training/datasets/, so partial ingestion (some sources not downloaded yet) still works.",
+  "_comment": "Per-dataset column mapping (raw column -> canonical field). All four verified 2026-08-20 against the actual downloaded files (see inspect_columns.py). fitness_exercises_dataset is JSON, not CSV - handled by a separate loader path in ingest_exercise_catalog.py.",
   "sources": {
     "exercises_dataset": {
       "kaggleUrl": "https://www.kaggle.com/datasets/akankshamishra0512/exercises-dataset",
-      "filename": "exercises_dataset.csv",
-      "columnsVerified": false,
+      "filename": "_src/exercises_dataset/final_exercise_dataset.csv",
+      "columnsVerified": true,
       "rawColumns": {
-        "name": "Name",
-        "primaryMuscle": "Muscle",
-        "equipment": "Equipment"
+        "name": "name",
+        "primaryMuscle": "target",
+        "equipment": "equipment",
+        "secondaryMuscles": "secondaryMuscles"
       },
-      "listSeparator": ","
+      "listSeparator": ",",
+      "_note": "secondaryMuscles/instructions are stored as Python-list-literal strings (e.g. \"['obliques']\") not separator-joined - handled by a literal-list parser, not the generic splitter."
     },
     "gym_exercises_dataset": {
       "kaggleUrl": "https://www.kaggle.com/datasets/rishitmurarka/gym-exercises-dataset",
-      "filename": "gym_exercises_dataset.csv",
-      "columnsVerified": false,
+      "filename": "_src/gym_exercises_dataset/gym_exercise_dataset.csv",
+      "columnsVerified": true,
       "rawColumns": {
-        "name": "Name",
-        "primaryMuscle": "Target_Muscle",
+        "name": "Exercise Name",
+        "primaryMuscle": "Main_muscle",
         "equipment": "Equipment",
         "mechanics": "Mechanics",
-        "utility": "Utility"
+        "utility": "Utility",
+        "secondaryMuscles": "Secondary Muscles"
       },
       "listSeparator": ","
     },
     "fitness_exercises_dataset": {
       "kaggleUrl": "https://www.kaggle.com/datasets/exercisedb/fitness-exercises-dataset",
-      "filename": "fitness_exercises_dataset.csv",
+      "filename": "_src/fitness_exercises_dataset/exercisedb_v1_sample/exercises.json",
+      "format": "exercisedb_json",
       "columnsVerified": true,
-      "_note": "This one mirrors the public ExerciseDB API, whose field names are well-documented (name, bodyPart, target, equipment, gifUrl, secondaryMuscles) - higher confidence than the other three, but still worth a quick inspect_columns.py check since the Kaggle CSV export could differ from the live API's JSON shape.",
+      "_note": "JSON list of {exerciseId, name, gifUrl, targetMuscles: [...], bodyParts: [...], equipments: [...], secondaryMuscles: [...]}. Only a ~30-exercise sample in this Kaggle release (folder is literally named exercisedb_v1_sample), not the full ExerciseDB catalog - still a useful cross-reference source, just don't expect it to dominate row count.",
       "rawColumns": {
         "name": "name",
-        "primaryMuscle": "target",
-        "equipment": "equipment",
+        "primaryMuscle": "targetMuscles",
+        "equipment": "equipments",
         "secondaryMuscles": "secondaryMuscles",
         "gifUrl": "gifUrl"
-      },
-      "listSeparator": ";"
+      }
     },
     "gym_exercise_data": {
       "kaggleUrl": "https://www.kaggle.com/datasets/niharika41298/gym-exercise-data",
-      "filename": "gym_exercise_data.csv",
-      "columnsVerified": false,
+      "filename": "_src/gym_exercise_data/megaGymDataset.csv",
+      "columnsVerified": true,
       "rawColumns": {
         "name": "Title",
         "primaryMuscle": "BodyPart",

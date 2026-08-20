@@ -14,8 +14,12 @@ def test_normalize_equipment_synonym():
     assert normalize_equipment("Olympic Bar") == "barbell"
 
 
+def test_normalize_equipment_synonym_resistance_band():
+    assert normalize_equipment("Resistance Band") == "resistance_band"
+
+
 def test_normalize_equipment_unknown_passthrough():
-    assert normalize_equipment("Resistance Band") == "resistance band"
+    assert normalize_equipment("Suspension Trainer") == "suspension trainer"
 
 
 def test_normalize_muscle_synonym():

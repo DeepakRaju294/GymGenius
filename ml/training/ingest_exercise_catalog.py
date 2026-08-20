@@ -8,6 +8,7 @@ Run: python ingest_exercise_catalog.py
 
 from __future__ import annotations
 
+import ast
 import json
 import re
 import sys
@@ -34,9 +35,63 @@ def _slugify(name: str) -> str:
 
 
 def _split_list(value, separator: str) -> List[str]:
+    """Handles both separator-joined strings ("barbell,bench") and Python-list-
+    literal strings ("['obliques']", as some Kaggle exports store list columns
+    when saved from a DataFrame) - tries literal_eval first, falls back to a
+    plain split so both formats work without per-source special-casing."""
     if pd.isna(value) or not value:
         return []
-    return [v.strip() for v in str(value).split(separator) if v.strip()]
+    text = str(value).strip()
+    if text.startswith("[") and text.endswith("]"):
+        try:
+            parsed = ast.literal_eval(text)
+            if isinstance(parsed, list):
+                return [str(v).strip() for v in parsed if str(v).strip()]
+        except (ValueError, SyntaxError):
+            pass
+    return [v.strip() for v in text.split(separator) if v.strip()]
+
+
+def _row_from_fields(name, primary_raw, equipment_list, secondary_list, mechanics=None, utility=None, gif_url=None, source_key=None) -> Dict:
+    primary = normalize_muscle(str(primary_raw)) if primary_raw else None
+    equipment = [normalize_equipment(e) for e in equipment_list]
+    secondary = [normalize_muscle(m) for m in secondary_list]
+    pattern, pattern_source, secondary_patterns = assign_movement_pattern(name)
+    mechanics = mechanics.strip().lower() if mechanics else None
+    utility = utility.strip().lower() if utility else None
+    return {
+        "name": name,
+        "primaryMuscle": primary,
+        "secondaryMuscles": secondary,
+        "equipment": equipment,
+        "mechanics": mechanics if mechanics in ("compound", "isolation") else None,
+        "utility": utility if utility in ("basic", "auxiliary") else None,
+        "movementPattern": pattern,
+        "movementPatternSource": pattern_source if pattern else None,
+        "secondaryMovementPatterns": secondary_patterns,
+        "gifUrl": gif_url.strip() if gif_url else None,
+        "sourceDataset": source_key,
+    }
+
+
+def _load_source_json_exercisedb(source_key: str, config: Dict, path: Path) -> List[Dict]:
+    """ExerciseDB's JSON shape - list-valued fields already, no separator parsing
+    needed. See source_configs.json's "format": "exercisedb_json"."""
+    data = json.loads(path.read_text(encoding="utf-8"))
+    cols = config["rawColumns"]
+    rows: List[Dict] = []
+    for item in data:
+        name = str(item.get(cols.get("name"), "")).strip()
+        if not name:
+            continue
+        primary_list = item.get(cols.get("primaryMuscle")) or []
+        primary_raw = primary_list[0] if primary_list else None
+        equipment_list = item.get(cols.get("equipment")) or []
+        secondary_list = item.get(cols.get("secondaryMuscles")) or []
+        gif_url = item.get(cols.get("gifUrl"))
+        rows.append(_row_from_fields(name, primary_raw, equipment_list, secondary_list, gif_url=gif_url, source_key=source_key))
+    print(f"  [loaded] {source_key}: {len(rows)} rows")
+    return rows
 
 
 def _load_source(source_key: str, config: Dict) -> List[Dict]:
@@ -50,6 +105,9 @@ def _load_source(source_key: str, config: Dict) -> List[Dict]:
             f"  [warning] {source_key}: rawColumns are unverified guesses - "
             f"run inspect_columns.py on {config['filename']} and check source_configs.json"
         )
+
+    if config.get("format") == "exercisedb_json":
+        return _load_source_json_exercisedb(source_key, config, path)
 
     df = pd.read_csv(path)
     cols = config["rawColumns"]
@@ -99,6 +157,33 @@ def _load_source(source_key: str, config: Dict) -> List[Dict]:
     return rows
 
 
+def _disambiguate_names(rows: List[Dict]) -> None:
+    """Real public data yields structurally-distinct exercises (different
+    equipment/mechanics) that legitimately share a display name - e.g. "Bench
+    Press" via barbell/dumbbell/smith/lever. Dedup correctly refuses to merge
+    them since equipment disagrees, but validate_catalog's duplicate-name check
+    then rejects the collision. Disambiguate by appending the primary
+    equipment, falling back to an index suffix if that's still not unique."""
+    by_name: Dict[str, List[Dict]] = {}
+    for row in rows:
+        by_name.setdefault(row["name"], []).append(row)
+
+    for name, group in by_name.items():
+        if len(group) <= 1:
+            continue
+        seen_labels: Dict[str, int] = {}
+        for row in group:
+            equipment = row.get("equipment") or []
+            label = equipment[0].split("(")[0].strip().replace("_", " ").title() if equipment else None
+            label = label or "Variant"
+            if label in seen_labels:
+                seen_labels[label] += 1
+                label = f"{label} {seen_labels[label]}"
+            else:
+                seen_labels[label] = 1
+            row["name"] = f"{name} ({label})"
+
+
 def _apply_caution_tags(rows: List[Dict]) -> None:
     caution = load_json("stoplist.json")
     match_index = {}
@@ -145,6 +230,8 @@ def main() -> None:
             merged.append(dict(all_rows[group[0]], source=all_rows[group[0]].pop("sourceDataset", None)))
         else:
             merged.append(merge_group(all_rows, group))
+
+    _disambiguate_names(merged)
 
     for row in merged:
         row["exerciseId"] = _slugify(row["name"])

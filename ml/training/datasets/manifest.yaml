@@ -5,18 +5,116 @@
 
 gym_members_exercise:
   source_url: https://www.kaggle.com/datasets/valakhorasani/gym-members-exercise-dataset
-  status: not_yet_downloaded  # blocked on Kaggle API token setup
-  downloaded_at: null
-  license: null  # fill in from the dataset's license tab once downloaded
-  license_verified_at: null
-  sha256: null
-  rows: null
-  usable_commercially: null
+  local_path: _src/gym_members_exercise/gym_members_exercise_tracking.csv
+  status: downloaded
+  downloaded_at: "2026-08-20"
+  license: apache-2.0
+  license_verified_at: "2026-08-20"
+  sha256: cfa58990806ea6e1594fb1977d875a0158038e6d492fb95ec9107d29eb632307
+  rows: 973
+  usable_commercially: true
   preprocessing_version: null
+  used_by: [calorie estimation (§4), cold-start Experience_Level signal (§3)]
 
-# Until the real file is present, train_calorie_model.py / train_calorie_model_torch.py
-# fall back to a labeled-synthetic sample (ml/training/calorie_data.py::_make_synthetic)
-# shaped like this dataset's known schema, purely to build and test the training/
-# comparison pipeline. Every eval report under ml/training/reports/ records
-# "dataSource": "synthetic" when this happened - none of those numbers should be
-# treated as real until this entry is filled in and the trainers are re-run.
+exercises_dataset:
+  source_url: https://www.kaggle.com/datasets/akankshamishra0512/exercises-dataset
+  local_path: _src/exercises_dataset/final_exercise_dataset.csv
+  status: downloaded
+  downloaded_at: "2026-08-20"
+  license: CC-BY-SA-4.0
+  license_verified_at: "2026-08-20"
+  sha256: 18e836fa60746be49b05d1ff13dc258838d5c6001a40856265653672f1012960
+  rows: 690
+  usable_commercially: true
+  preprocessing_version: null
+  used_by: [exercise catalog ingestion (§1)]
+  attribution_note: >
+    CC-BY-SA-4.0 requires attribution and ShareAlike for redistribution of the
+    dataset itself. The catalog derived from it is merged with other sources
+    and stored in our own DB schema (transformative use), not redistributed
+    as this dataset - still, credit akankshamishra0512 in any public dataset
+    documentation/about page.
+
+gym_exercises_dataset:
+  source_url: https://www.kaggle.com/datasets/rishitmurarka/gym-exercises-dataset
+  local_path: _src/gym_exercises_dataset/gym_exercise_dataset.csv
+  status: downloaded
+  downloaded_at: "2026-08-20"
+  license: unknown
+  license_verified_at: "2026-08-20"
+  sha256: 53a6b307b6916c5dabf983276fff221a1fbc7e057ce9306f2089632526794234
+  rows: 673
+  usable_commercially: false
+  preprocessing_version: null
+  used_by: [exercise catalog ingestion (§1)]
+  caution: >
+    Kaggle lists this dataset's license as "unknown" (confirmed via
+    `kaggle datasets metadata`, not just an unset field). Per §8's licensing
+    checklist, unknown-license data is not cleared for commercial use.
+    Currently ingested into the training-time catalog only, gitignored and
+    never committed - do not treat isSelectable exercises sourced solely from
+    this dataset as clear for a commercial/public release without either
+    getting the uploader to clarify licensing or re-deriving those rows'
+    fields (muscle/equipment/movementPattern) independently from a cleared
+    source.
+
+fitness_exercises_dataset:
+  source_url: https://www.kaggle.com/datasets/exercisedb/fitness-exercises-dataset
+  local_path: _src/fitness_exercises_dataset/exercisedb_v1_sample/exercises.json
+  status: downloaded
+  downloaded_at: "2026-08-20"
+  license: MIT (per Kaggle listing, "Open Source" tier only - see caution)
+  license_verified_at: "2026-08-20"
+  sha256: c01a65a94505eb92ecb9fea4327a453b64d76eed8f6d47e56927e7a40e48dfa2
+  rows: 30
+  usable_commercially: true
+  preprocessing_version: null
+  used_by: [exercise catalog ingestion (§1), gifUrl cross-reference]
+  caution: >
+    This Kaggle listing is a paid product (ExerciseDB sells Starter/Standard/
+    Premium tiers with higher-res GIFs); what we downloaded is explicitly
+    their free "Open Source" sample tier (folder literally named
+    exercisedb_v1_sample, ~30 exercises at 180p GIF resolution, per the
+    listing description). Kaggle's own license field says MIT, which we take
+    to apply to this free sample tier only - do not assume it extends to the
+    full 1500+-exercise paid catalog if that's ever purchased/added later;
+    re-verify licensing terms explicitly at that point.
+
+gym_exercise_data:
+  source_url: https://www.kaggle.com/datasets/niharika41298/gym-exercise-data
+  local_path: _src/gym_exercise_data/megaGymDataset.csv
+  status: downloaded
+  downloaded_at: "2026-08-20"
+  license: CC0-1.0
+  license_verified_at: "2026-08-20"
+  sha256: f123712bc708aceac848f9d125c24fa3719d8f3d3a77c528a2a1fce793e7c2c1
+  rows: 2918
+  usable_commercially: true
+  preprocessing_version: null
+  used_by: [exercise catalog ingestion (§1) - largest single source, 2918 of 4253 raw rows]
+
+body_performance:
+  source_url: https://www.kaggle.com/datasets/kukuroo3/body-performance-data
+  local_path: _src/body_performance/bodyPerformance.csv
+  status: downloaded
+  downloaded_at: "2026-08-20"
+  license: CC0-1.0
+  license_verified_at: "2026-08-20"
+  sha256: b200de0bdcb1c8f6ca28050286adccb352b7ce2dca9e7d5fea98b9990e50eb8f
+  rows: 13393
+  usable_commercially: true
+  preprocessing_version: null
+  used_by: >
+    Not wired into a trainer yet - §3 explicitly rejected training a general
+    fitness classifier on this dataset's A-D grade and using it to scale
+    barbell loads (false precision, see §3's rationale). Kept downloaded in
+    case a future per-movement-family strength model wants its grip
+    strength/sit-up/broad-jump features as auxiliary signal, not a direct
+    predictor.
+
+# Ingestion pipeline note: ml/training/ingest_exercise_catalog.py currently
+# only loads exercises_dataset, gym_exercises_dataset, fitness_exercises_dataset,
+# and gym_exercise_data (see source_configs.json) - gym_members_exercise and
+# body_performance are tabular fitness-metric datasets, not exercise catalogs,
+# and are consumed directly by train_calorie_model*.py / a future cold-start
+# trainer instead.

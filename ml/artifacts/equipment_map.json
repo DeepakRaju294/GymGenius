@@ -1,6 +1,12 @@
 {
-  "barbell": ["barbell", "olympic bar"],
-  "dumbbell": ["dumbbell", "db"],
-  "bench": ["flat bench", "adjustable bench", "bench"],
-  "cable": ["cable", "cable machine", "pulley"]
+  "barbell": ["barbell", "olympic bar", "ez barbell", "ez bar", "trap bar"],
+  "dumbbell": ["dumbbell", "db", "dumbbells"],
+  "bench": ["flat bench", "adjustable bench", "bench", "incline bench"],
+  "cable": ["cable", "cable machine", "pulley"],
+  "bodyweight": ["body weight", "bodyweight", "none", "self", "body only"],
+  "machine": ["machine", "leverage machine", "smith machine", "sled machine", "hammer machine", "assisted machine"],
+  "resistance_band": ["band", "bands", "resistance band", "resistance bands"],
+  "kettlebell": ["kettlebell", "kettlebells", "kb"],
+  "medicine_ball": ["medicine ball", "med ball", "exercise ball", "stability ball"],
+  "roller": ["roller", "foam roll"]
 }

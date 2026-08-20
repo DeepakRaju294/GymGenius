@@ -1,6 +1,21 @@
 {
   "chest": ["chest", "pecs", "pectoralis"],
-  "back": ["back", "mid-back"],
+  "back": ["back", "mid-back", "upper back", "lower back", "spine"],
   "lats": ["lats", "latissimus dorsi"],
-  "quads": ["quadriceps", "quads"]
+  "quads": ["quadriceps", "quads"],
+  "hamstrings": ["hamstrings", "hams"],
+  "glutes": ["glutes", "gluteus maximus", "gluteus"],
+  "calves": ["calves", "calf"],
+  "shoulders": ["shoulders", "delts", "deltoids"],
+  "rear delts": ["rear delts", "posterior deltoid", "rear deltoids"],
+  "triceps": ["triceps", "triceps brachii"],
+  "biceps": ["biceps", "biceps brachii"],
+  "forearms": ["forearms", "forearm"],
+  "abs": ["abs", "abdominals", "abdominal", "waist", "core"],
+  "obliques": ["obliques", "serratus anterior"],
+  "traps": ["traps", "trapezius"],
+  "adductors": ["adductors", "adductor"],
+  "abductors": ["abductors", "abductor"],
+  "neck": ["neck"],
+  "cardiovascular": ["cardiovascular system", "cardio"]
 }
