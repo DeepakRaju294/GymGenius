@@ -16,6 +16,13 @@ const setSchema = new mongoose.Schema({
         enum: ['lb', 'kg'],
         default: 'lb'
     },
+    // Optional - most users won't log this. docs/ML_SPEC.md §4: only used when
+    // present to pick the calorie model path over the MET fallback.
+    avgHeartRate: {
+        type: Number,
+        min: 0,
+        max: 250
+    },
     notes: {
         type: String,
         trim: true

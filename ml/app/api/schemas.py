@@ -55,3 +55,18 @@ class FeedbackRequest(BaseModel):
     username: str
     action: FeedbackAction
     reason: Optional[str] = Field(None, description="Optional reason ('no equipment', 'too heavy')")
+
+
+class EstimateCaloriesRequest(BaseModel):
+    durationHours: float = Field(..., gt=0, le=6)
+    weightKg: float = Field(..., gt=0, le=300)
+    workoutType: Literal["Cardio", "Strength", "HIIT", "Yoga"] = "Strength"
+    avgHeartRate: Optional[float] = Field(None, gt=0, le=250, description="If omitted, falls back to the MET-intensity estimate")
+    totalSets: int = Field(0, ge=0, description="Used by the MET fallback to infer session intensity")
+
+
+class EstimateCaloriesResponse(BaseModel):
+    estimatedCalories: float
+    method: Literal["model", "met"]
+    modelVersion: Optional[str] = None
+    intensityCategory: Optional[str] = None

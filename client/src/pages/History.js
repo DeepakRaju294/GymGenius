@@ -9,8 +9,70 @@ export default function History() {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalWorkouts, setTotalWorkouts] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
-  
-  const WORKOUTS_PER_PAGE = 10; 
+  const [profileWeightKg, setProfileWeightKg] = useState(null);
+  const [calorieEstimates, setCalorieEstimates] = useState({});
+  const [calorieLoading, setCalorieLoading] = useState({});
+
+  const WORKOUTS_PER_PAGE = 10;
+
+  useEffect(() => {
+    const fetchProfileWeight = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        if (!token) return;
+        const res = await axios.get('http://localhost:5000/api/v1/profile', {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        const p = res.data?.data;
+        if (p?.weight) {
+          const kg = p.weightUnit === 'kg' ? p.weight : p.weight * 0.453592;
+          setProfileWeightKg(kg);
+        }
+      } catch (err) {
+        // Calorie estimation just won't be offered without a profile weight - not fatal.
+      }
+    };
+    fetchProfileWeight();
+  }, []);
+
+  const estimateCalories = async (workout) => {
+    const workoutId = workout._id || workout.id;
+    if (!profileWeightKg || !workout.workoutDuration) return;
+
+    const totalSets = (workout.exercises || []).reduce(
+      (sum, ex) => sum + (Array.isArray(ex.sets) ? ex.sets.length : 0),
+      0
+    );
+    const heartRates = (workout.exercises || [])
+      .flatMap(ex => (ex.sets || []).map(s => s.avgHeartRate))
+      .filter(v => typeof v === 'number');
+    const avgHeartRate = heartRates.length
+      ? heartRates.reduce((a, b) => a + b, 0) / heartRates.length
+      : undefined;
+
+    setCalorieLoading(prev => ({ ...prev, [workoutId]: true }));
+    try {
+      const token = localStorage.getItem('token');
+      const res = await axios.post(
+        'http://localhost:5000/api/v1/calories/estimate',
+        {
+          durationHours: workout.workoutDuration / 60,
+          weightKg: profileWeightKg,
+          workoutType: 'Strength',
+          avgHeartRate,
+          totalSets
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (res.data?.success) {
+        setCalorieEstimates(prev => ({ ...prev, [workoutId]: res.data.data }));
+      }
+    } catch (err) {
+      // Best-effort feature - the server already tolerates the ml service being down.
+    } finally {
+      setCalorieLoading(prev => ({ ...prev, [workoutId]: false }));
+    }
+  };
 
   useEffect(() => {
     const fetchWorkoutHistory = async () => {
@@ -347,6 +409,27 @@ export default function History() {
                         <div className="text-xs text-[#9fb0c9]">
                           {formatDuration(workout.workoutDuration || workout.duration)}
                         </div>
+                        {profileWeightKg && (() => {
+                          const workoutId = workout._id || workout.id;
+                          const estimate = calorieEstimates[workoutId];
+                          if (estimate) {
+                            return (
+                              <div className="text-xs text-[#7fd39a] mt-1">
+                                ~{Math.round(estimate.estimatedCalories)} kcal
+                                {estimate.method === 'met' ? ' (estimated)' : ''}
+                              </div>
+                            );
+                          }
+                          return (
+                            <button
+                              onClick={() => estimateCalories(workout)}
+                              disabled={calorieLoading[workoutId]}
+                              className="text-xs text-[#8fb0ff] hover:underline mt-1 disabled:opacity-50"
+                            >
+                              {calorieLoading[workoutId] ? 'Estimating...' : 'Estimate calories'}
+                            </button>
+                          );
+                        })()}
                       </div>
                     </div>
 

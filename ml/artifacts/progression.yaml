@@ -1,0 +1,10 @@
+upper_body_increment_lbs: 2.5
+lower_body_increment_lbs: 5.0
+rest_window_hours: 48
+novelty_days: 21
+
+weights:
+  align: 0.35
+  recency: 0.25
+  frequency: 0.25
+  success: 0.15

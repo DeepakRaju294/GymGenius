@@ -180,6 +180,8 @@ Lower priority than §1-3 — it's a genuinely new standalone feature, but unlik
 
 **Evaluation**: hold out 20% of the Kaggle rows, report MAE against the model and against the MET fallback — ship the model only if it beats the fallback by a real margin.
 
+**PyTorch benchmark (deliberate, scoped exception to §6)**: `ml/training/train_calorie_model_torch.py` trains a small MLP (2 hidden layers, dropout, weight decay, early-stopped on a validation split) on the same features and reports MAE against `train_calorie_model.py`'s scikit-learn model on the same held-out test set (`ml/training/reports/calorie_model_comparison.json`). This does not change what ships — `model_registry.py` only ever loads the scikit-learn artifact, per §6's reasoning about data volume — it exists to make that choice measured rather than assumed, and because deliberately building and evaluating a neural net against a classical baseline on a real dataset is worth more (as a skill, and as evidence of judgment) than either avoiding PyTorch entirely or using it somewhere it would quietly compromise the product. If it ever wins by a real margin on the real (non-synthetic) dataset, that result should prompt a real conversation about switching, not an automatic swap.
+
 ## 5. Learned re-ranker (the original ask — gated on real usage data)
 
 `selection/scorer.py`'s weights (`0.30 align + 0.25 recency + 0.20 frequency + 0.25 balance`) are fixed because there's no labeled data yet to fit them. The `recommendations` + `rec_feedback` + `completionRate`/`progressionRate` infrastructure ([docs/SPEC.md](SPEC.md) §4.7, §4.3) exists specifically to accumulate that data.
@@ -240,7 +242,9 @@ ml/
     normalize.py                     # wraps artifacts/equipment_map.json, muscle_groups.json
     build_exercise_similarity_index.py  # §2
     train_cold_start_estimator.py    # §3
-    train_calorie_model.py           # §4
+    calorie_data.py, calorie_features.py  # §4 - shared by both calorie trainers below
+    train_calorie_model.py           # §4 - scikit-learn, what actually ships
+    train_calorie_model_torch.py     # §4 - PyTorch MLP benchmark, comparison only
     train_reranker.py                # §5 - refuses to run below the volume/diversity gate
     evaluate.py                      # shared GroupShuffleSplit-by-user + metric reporting
   app/

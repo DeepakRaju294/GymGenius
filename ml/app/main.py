@@ -6,8 +6,10 @@ load_dotenv()  # picks up ml/.env in local dev; a real deployment sets these dir
 
 from fastapi import FastAPI, HTTPException, Response
 
-from app.api.schemas import FeedbackRequest, RecommendRequest, RecommendResponse
+from app.api.schemas import EstimateCaloriesRequest, EstimateCaloriesResponse, FeedbackRequest, RecommendRequest, RecommendResponse
 from app.services.recommender import Recommender
+from app.services.ml import calorie_model
+from app.services.ml.model_registry import model_status
 from app.utils.cache import redis_ping
 from app.utils.db import ensure_indexes, mongo_ping
 
@@ -61,3 +63,19 @@ def feedback(req: FeedbackRequest):
     except Exception:
         pass
     return Response(status_code=204)
+
+
+@app.post("/estimate-calories", response_model=EstimateCaloriesResponse)
+def estimate_calories(req: EstimateCaloriesRequest):
+    return calorie_model.estimate(
+        duration_hours=req.durationHours,
+        avg_bpm=req.avgHeartRate,
+        weight_kg=req.weightKg,
+        workout_type=req.workoutType,
+        total_sets=req.totalSets,
+    )
+
+
+@app.get("/ml/status")
+def ml_status():
+    return model_status()

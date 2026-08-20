@@ -1,0 +1,22 @@
+# docs/ML_SPEC.md §8 - one entry per dataset. This file lives in a gitignored
+# directory alongside the raw CSVs (ml/training/datasets/**) since it documents
+# specific downloaded files, not shared config - update it every time a dataset
+# is (re)downloaded.
+
+gym_members_exercise:
+  source_url: https://www.kaggle.com/datasets/valakhorasani/gym-members-exercise-dataset
+  status: not_yet_downloaded  # blocked on Kaggle API token setup
+  downloaded_at: null
+  license: null  # fill in from the dataset's license tab once downloaded
+  license_verified_at: null
+  sha256: null
+  rows: null
+  usable_commercially: null
+  preprocessing_version: null
+
+# Until the real file is present, train_calorie_model.py / train_calorie_model_torch.py
+# fall back to a labeled-synthetic sample (ml/training/calorie_data.py::_make_synthetic)
+# shaped like this dataset's known schema, purely to build and test the training/
+# comparison pipeline. Every eval report under ml/training/reports/ records
+# "dataSource": "synthetic" when this happened - none of those numbers should be
+# treated as real until this entry is filled in and the trainers are re-run.

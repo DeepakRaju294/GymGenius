@@ -2,13 +2,27 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional, Tuple
 
+from app.utils.artifacts import load_json
 from app.utils.db import mongo
 from app.services.history import equipment_profile, fetch_user_history, get_exercise_catalog, recent_muscles
 
 
 def _exercise_matches_focus(ex_doc: dict, focus: Optional[str]) -> bool:
+    """docs/ML_SPEC.md §1 step 5: a focus request expands to the muscle groups it
+    actually means (workout_focus_tags.json), matched against the exercise's
+    primaryMuscle - not a literal check against the exercise's own `tags` array,
+    which meant focus="push" never matched an exercise tagged only "chest"."""
     if not focus:
         return True
+    try:
+        focus_map = load_json("workout_focus_tags.json")
+    except FileNotFoundError:
+        focus_map = {}
+    muscles = focus_map.get(focus)
+    if muscles:
+        return ex_doc.get("primaryMuscle") in muscles
+    # Unknown focus key (not in the curated map) - fall back to a literal tag match
+    # rather than matching everything or nothing.
     tags = ex_doc.get("tags") or []
     return isinstance(tags, list) and focus in tags
 

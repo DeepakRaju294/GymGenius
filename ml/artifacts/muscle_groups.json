@@ -1,0 +1,6 @@
+{
+  "chest": ["chest", "pecs", "pectoralis"],
+  "back": ["back", "mid-back"],
+  "lats": ["lats", "latissimus dorsi"],
+  "quads": ["quadriceps", "quads"]
+}

@@ -1,0 +1,6 @@
+{
+  "barbell": ["barbell", "olympic bar"],
+  "dumbbell": ["dumbbell", "db"],
+  "bench": ["flat bench", "adjustable bench", "bench"],
+  "cable": ["cable", "cable machine", "pulley"]
+}

@@ -6,6 +6,7 @@ const historyRouter = require('./routes/historyRoutes');
 const profileRouter = require('./routes/profileRoutes');
 const recommendationRouter = require('./routes/recommendationRoutes');
 const exerciseRouter = require('./routes/exerciseRoutes');
+const calorieRouter = require('./routes/calorieRoutes');
 const app = express();
 
 app.use(cors());
@@ -21,5 +22,6 @@ app.use('/api/v1/profile', profileRouter);
 app.use('/api/v1/auth', authRouter);
 app.use('/api/v1/recommendation', recommendationRouter);
 app.use('/api/v1/exercises', exerciseRouter);
+app.use('/api/v1/calories', calorieRouter);
 
 module.exports = app;

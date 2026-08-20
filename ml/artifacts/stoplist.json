@@ -1,0 +1,23 @@
+{
+  "_comment": "docs/ML_SPEC.md §1 step 4 - caution seed data, matched by exercise name during ingestion. Tags, not a blanket exclude list - candidate_pool() does not filter on cautionTags by default; this is groundwork for future per-user limitations filtering. evidenceLevel is honest about how well-established each claim is.",
+  "entries": [
+    {
+      "matchNames": ["Upright Row (barbell wide grip)", "Barbell Upright Row"],
+      "cautionTags": ["high_shoulder_external_rotation"],
+      "cautionReason": "Commonly flagged for shoulder impingement risk, particularly with a narrow grip.",
+      "evidenceLevel": "common_guidance"
+    },
+    {
+      "matchNames": ["Behind the Neck Press", "Behind-the-Neck Press"],
+      "cautionTags": ["high_shoulder_external_rotation"],
+      "cautionReason": "Requires significant shoulder external rotation under load; commonly recommended against for people with shoulder mobility limitations.",
+      "evidenceLevel": "common_guidance"
+    },
+    {
+      "matchNames": ["Good Morning"],
+      "cautionTags": ["high_spinal_loading"],
+      "cautionReason": "High spinal loading in a mechanically vulnerable position if performed with poor form or excessive load.",
+      "evidenceLevel": "common_guidance"
+    }
+  ]
+}

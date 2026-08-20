@@ -111,16 +111,21 @@ downloads/
 # Ignore raw/generated data by default, keep curated seeds
 **/data/**
 !**/data/.gitkeep
+ml/training/datasets/**
+!ml/training/datasets/.gitkeep
+!ml/training/datasets/manifest.yaml
+ml/training/reports/**
+!ml/training/reports/.gitkeep
 
-# Model/binary artifacts
+# Model/binary artifacts - trained model output only. ml/artifacts/ is NOT this:
+# it holds hand-curated config (equipment/muscle synonym maps, movement-pattern
+# tables, etc.) that the training pipeline depends on and must be tracked.
 **/*.pkl
 **/*.joblib
 **/*.pt
 **/*.pth
 **/*.onnx
 **/*.h5
-artifacts/
-checkpoints/
 app/models/checkpoints/*
 !app/models/checkpoints/.gitkeep
 

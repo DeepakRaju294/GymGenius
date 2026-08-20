@@ -1,0 +1,5 @@
+{
+  "strength":   { "sets": 3, "reps": 5 },
+  "hypertrophy":{ "sets": 3, "reps": 10 },
+  "endurance":  { "sets": 3, "reps": 15 }
+}

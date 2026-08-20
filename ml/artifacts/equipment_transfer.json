@@ -1,0 +1,35 @@
+{
+  "_comment": "docs/ML_SPEC.md §3 tier 2 - rough, hand-authored multipliers for converting a known weight on one equipment type to a starting estimate on another, within the SAME movementPattern. Deliberately conservative (biased low) since this feeds a starting suggestion, never a claim. Multiplier is applied to the source weight (already per-hand for dumbbell figures) to estimate the target. Refine from real user data once available - not derived from any dataset.",
+  "horizontal_push": {
+    "barbell->dumbbell_per_hand": 0.4,
+    "dumbbell_per_hand->barbell": 2.2,
+    "barbell->machine": 0.9,
+    "machine->barbell": null
+  },
+  "vertical_push": {
+    "barbell->dumbbell_per_hand": 0.4,
+    "dumbbell_per_hand->barbell": 2.2,
+    "barbell->machine": 0.9,
+    "machine->barbell": null
+  },
+  "horizontal_pull": {
+    "barbell->dumbbell_per_hand": 0.45,
+    "dumbbell_per_hand->barbell": 2.0,
+    "barbell->cable": 0.95,
+    "cable->barbell": null
+  },
+  "vertical_pull": {
+    "cable->bodyweight_assisted": null,
+    "bodyweight_assisted->cable": null
+  },
+  "squat": {
+    "barbell->dumbbell_per_hand": 0.3,
+    "dumbbell_per_hand->barbell": 3.0,
+    "barbell->machine": 1.1,
+    "machine->barbell": null
+  },
+  "hinge": {
+    "barbell->dumbbell_per_hand": 0.35,
+    "dumbbell_per_hand->barbell": 2.6
+  }
+}

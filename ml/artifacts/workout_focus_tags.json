@@ -1,0 +1,7 @@
+{
+  "push":   ["chest", "shoulders", "triceps"],
+  "pull":   ["back", "lats", "biceps", "rear_delts"],
+  "legs":   ["quads", "hamstrings", "glutes", "calves"],
+  "upper":  ["chest", "shoulders", "triceps", "biceps", "back", "lats"],
+  "lower":  ["quads", "hamstrings", "glutes", "calves"]
+}
