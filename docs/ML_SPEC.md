@@ -44,21 +44,25 @@ movementPattern: {
     'core_flexion', 'core_anti_extension'
   ]
 },
+movementPatternSource: { type: String, enum: ['dataset', 'rule', 'manual'] },
+secondaryMovementPatterns: { type: [String], default: [] },  // e.g. a clean and press is hinge + vertical_push
 gifUrl: { type: String },
 source: { type: String },       // which dataset(s) contributed this entry, for provenance
 ```
 
 `movementPattern` matters because muscle group + equipment + mechanics can match while the movement itself is unrelated (dumbbell bench press and dumbbell fly are both "chest, dumbbell, compound-ish" but are not good substitutes for each other). §2's substitution ranking is built around this field, not around cosine similarity over the coarser attributes alone.
 
+`movementPatternSource` exists because assignment confidence varies — most rows are unambiguous ("barbell back squat" is obviously `squat`, `source: rule`), but compound/hybrid movements (Arnold press, landmine press, kettlebell clean, Turkish get-up, sled push) don't map cleanly to one category, and knowing *how* a pattern was assigned makes later catalog cleanup tractable instead of treating every assignment as equally certain. `secondaryMovementPatterns` is included now but populated for almost nothing in Phase 9 — its only job is making sure nothing downstream (similarity ranking, substitution logic) is written assuming an exercise can only ever have one movement pattern, since some genuinely need two (a thruster is `squat` + `vertical_push`).
+
 **Pipeline** (`ml/training/ingest_exercise_catalog.py`):
 1. Download each CSV into `ml/training/datasets/` (gitignored via the repo's existing `**/data/**` pattern), recording provenance in a manifest (see §8).
 2. Normalize equipment/muscle-group text through `ml/artifacts/equipment_map.json` / `muscle_groups.json`.
 3. **Two-stage dedup across the three sources**, not a single similarity score with an automatic merge threshold — a name-similarity match alone will both false-merge ("Incline Bench Press" vs "Decline Bench Press" read as near-identical strings) and miss real duplicates ("DB Bulgarian Split Squat" vs "Rear-Foot Elevated Dumbbell Split Squat"):
    - **Candidate generation**: `scikit-learn`'s `TfidfVectorizer` + cosine similarity over normalized exercise names, to produce a shortlist of plausible duplicates cheaply.
-   - **Merge validation**: a candidate pair is only auto-merged if it also agrees on `primaryMuscle`, has compatible `equipment`, and (once assigned) the same `movementPattern`. Anything that passes name-similarity but fails structural agreement is written to a review file instead of merged automatically:
+   - **Merge validation**: a candidate pair is only auto-merged if it also agrees on `primaryMuscle`, has compatible `equipment`, and (once assigned) the same `movementPattern`. Anything that passes name-similarity but fails structural agreement is written to `ml/training/reports/catalog_review.csv` instead of merged automatically, flagged with the reason (`AMBIGUOUS_DUPLICATE`, `UNKNOWN_MOVEMENT_PATTERN`, `UNKNOWN_EQUIPMENT`, `CONFLICTING_PRIMARY_MUSCLE`, `MISSING_MEDIA`):
      ```text
      0.96  Dumbbell Bench Press <-> DB Bench Press           AUTO-MERGE
-     0.84  Incline DB Press <-> Dumbbell Bench Press         REVIEW
+     0.84  Incline DB Press <-> Dumbbell Bench Press         REVIEW: AMBIGUOUS_DUPLICATE
      0.63  Cable Fly <-> Pec Deck                            KEEP SEPARATE
      ```
    - `movementPattern` itself has to be assigned per source row before validation can use it — do this as a rule-based lookup keyed on exercise name/equipment/mechanics first (most rows are unambiguous — "barbell back squat" is obviously `squat`), and only hand-review the ambiguous remainder. Not a model; a lookup table, same spirit as `equipment_map.json`.
@@ -71,6 +75,15 @@ source: { type: String },       // which dataset(s) contributed this entry, for 
    ```
    `candidate_pool()` doesn't exclude anything by default from this; a future (out-of-scope-here) profile field for self-reported limitations would down-rank or exclude exercises whose `cautionTags` match, so a caution tag becomes personalized filtering instead of a claim that an exercise is inherently dangerous for everyone.
 5. **Focus matching fix**: `_exercise_matches_focus()` in `selection/candidate_pool.py` currently checks the exercise's own `tags` array against the requested focus string directly, so `focus="push"` doesn't match an exercise tagged only `"chest"`. Replace with a lookup through `workout_focus_tags.json` (`"push"` → `{chest, shoulders, triceps}`) matched against `primaryMuscle`.
+6. **Validation, as a first-class step that can fail the pipeline** (`ml/training/validate_catalog.py`, run as `ingest_exercise_catalog.py && validate_catalog.py`) — bad catalog data contaminates every feature downstream of it, so this isn't optional or best-effort:
+   - every importable exercise has a canonical `primaryMuscle` and `equipment` value (not an un-normalized raw string that slipped past step 2),
+   - every exercise intended to be selectable has a `movementPattern`,
+   - no duplicate canonical names survive,
+   - no value outside the declared schema enums,
+   - no `source` reference pointing at a dataset that wasn't actually ingested,
+   - no `gifUrl` mapped to more than one distinct canonical exercise,
+   - the `catalog_review.csv` count from step 3 is reported, not silently dropped.
+   The ingestion job fails (non-zero exit) if these invariants aren't met — bad public data gets coerced into the schema loudly or not at all, never silently.
 
 **Output**: `npm run seed` (or a new `ml/training/seed_from_catalog.py` writing directly to Mongo) populates hundreds-to-thousands of real, structurally-validated exercises instead of 18.
 
@@ -106,7 +119,7 @@ source: { type: String },       // which dataset(s) contributed this entry, for 
 - **Direct**: ask 3-4 short onboarding questions with real signal — push-ups in a minute, whether they've bench pressed before and roughly what weight, an approximate goblet-squat or bodyweight-squat comfort level. This alone gets most of the value with no model at all.
 - **Model-assisted**: [Gym Members Exercise Dataset](https://www.kaggle.com/datasets/valakhorasani/gym-members-exercise-dataset)'s `Experience_Level` field, combined with the direct-question answers, trains a `scikit-learn` `HistGradientBoostingClassifier` to fill in movement families the user didn't directly answer for, from the ones they did.
 
-**Where the starting range actually comes from** (this needs to be explicit, or whoever implements it invents an unstated policy): not a single number, and not hidden inside the model — a small, explicitly-authored table of safe exploration ranges per `movementPattern` + `equipment` combination, scaled by the predicted strength tier for that movement family:
+**Where the starting range actually comes from** (this needs to be explicit, or whoever implements it invents an unstated policy): not a single number, and not hidden inside the model — a small, explicitly-authored table of **conservative starting ranges** (not "safe" ranges — that word claims a guarantee the system can't actually make) per `movementPattern` + `equipment` combination, scaled by the predicted strength tier for that movement family:
 ```text
 horizontal_push + dumbbell, beginner tier:   5-15 lb per hand
 horizontal_push + barbell,  beginner tier:   scaled from bodyweight + anchor-question answers
@@ -115,10 +128,21 @@ horizontal_push + barbell,  beginner tier:   scaled from bodyweight + anchor-que
 ```
 This table lives in `ml/artifacts/` alongside the other config, versioned the same way (§7) — it is a deliberately conservative starting *suggestion*, always user-adjustable, never presented as authoritative.
 
+**This whole section only fires when nothing better is available.** `apply_progression()` should follow an explicit evidence-priority order, not treat the cold-start estimate as one option among equals:
+```text
+1. Recent history for this exact exercise           (already implemented, docs/SPEC.md §3)
+2. Recent history for another exercise in the same movementPattern
+3. User-provided anchor performance ("I bench ~135x8")
+4. This section's cold-start model estimate
+5. The conservative population-level starting range, unscaled
+6. No suggestion - ask the user to enter their own starting weight
+```
+Once a user has ever logged the exercise, tiers 3-6 stop mattering — real history always wins. This ordering is what makes `apply_progression`'s behavior predictable rather than an implementation detail decided ad hoc later.
+
 **Integration**:
 - New collection `fitness_assessments`: `{ username, inputs: {...}, predictedByFamily: {upper_push: "beginner", ...}, confidence, modelVersion, createdAt }`.
 - New optional onboarding step in `Login.js`'s profile-completion flow (skippable).
-- `prescription/progression.py::apply_progression()` gains a fallback: when `last_top_weight()` is `None`, look up the exercise's `movementPattern`/`equipment` in the starting-range table, scaled by the relevant predicted tier, instead of returning `None` unconditionally.
+- `prescription/progression.py::apply_progression()` implements the priority order above; only falls through to the starting-range table (tier 4/5) when tiers 1-3 have nothing to offer, instead of returning `None` unconditionally.
 
 **Evaluation**: split by user (`GroupShuffleSplit`, not a random row split — Kaggle rows aren't independent of the person they came from, and the same concern applies to any first-party data used here later), report per-family accuracy/F1. Always surfaced to the user as a confidence-qualified, editable suggestion.
 
@@ -132,7 +156,7 @@ Lower priority than §1-3 — it's a genuinely new standalone feature, but unlik
 
 **The catch**: almost no GymGenius user will have heart-rate data. Ship two paths:
 - **Model path** (`ml/app/services/ml/calorie_model.py::estimate(...)`) when heart rate is available.
-- **MET fallback** (`estimate_met(duration, weight, exercise_ids)`) — a static per-exercise MET-value table, not learned — what actually runs for most users.
+- **MET fallback** (`estimate_met(duration, weight, exercise_ids)`) — not a per-exercise MET table (implying more precision than actually exists — "Barbell Curl: 4.2 MET" vs. "Cable Curl: 4.0 MET" isn't a real distinction anyone has measured). Map the workout to the nearest of a handful of MET *intensity categories* instead (`resistance_training_light`, `resistance_training_moderate`, `resistance_training_vigorous`, `circuit_training`), inferred from set count/rest pattern/exercise `mechanics`, and look up the category's MET value — a static table either way, just at a defensible granularity. What actually runs for most users.
 
 **Integration**: optional `avgHeartRate: Number` on `historyModel`'s set schema; new `POST /estimate-calories` proxied through the server; an "Estimated calories" line in `History.js` and the Progress page.
 
@@ -150,15 +174,18 @@ utility = acceptance
         - immediate_swap penalty
         - repeated_same_muscle penalty (from the balance term already in score_rules)
 ```
-Longer-term this becomes `P(successful_session | recommendation)` rather than `P(click | recommendation)` — a ranking objective aligned with what GymGenius is actually for, not with engagement.
+Longer-term this becomes `P(successful_session | recommendation)` rather than `P(click | recommendation)` — a ranking objective aligned with what GymGenius is actually for, not with engagement. Acceptance, completion, and progression also happen on genuinely different timescales (immediate, same-workout, days-to-weeks later) — compressing them into one composite label now is the right starting move for Phase 13, but the likely next evolution is predicting each outcome separately (`P(accept)`, `P(complete)`, `P(progress)`, `P(swap)`) and combining them at scoring time, rather than requiring one arbitrary blended training label indefinitely. Not required for Phase 13 — worth knowing the composite approach isn't meant to be the permanent shape.
 
-**Trigger condition**: a volume threshold is an engineering safeguard, not evidence the data is statistically adequate — the spec's original framing ("≥2,000 pairs across ≥50 users") could still pass with 90% of samples from ten highly active users, or with 95% identical labels. Gate on all of the following, not just row count:
+**Trigger condition**: a volume threshold is an engineering safeguard, not evidence the data is statistically adequate — the spec's original framing ("≥2,000 pairs across ≥50 users") could still pass with 90% of samples from ten highly active users, with 95% identical labels, or with data almost entirely from `push`-focused sessions. Gate on all of the following, not just row count:
 - ≥ 2,000 recommendation-feedback pairs
 - ≥ 50 distinct users, no single user contributing more than ~10% of pairs
 - both accepted and swapped/rejected outcomes represented (not near-all-one-label)
 - a meaningful spread of distinct candidate exercises represented, not dominated by a handful
+- no major workout-focus category (push/pull/legs/upper/lower) negligibly represented — a model trained almost entirely on one focus shouldn't be trusted to rank the others
 
-**Model**: `scikit-learn`'s `LogisticRegression` or `GradientBoostingClassifier` on the composite target above. **Evaluate split by user**, not by row — the goal is generalizing to a new user's preferences, and a random row split leaks the same user's other feedback into both train and test.
+**Model**: `scikit-learn`'s `LogisticRegression` or `GradientBoostingClassifier` on the composite target above. **Two evaluation splits, not one, once this actually ships** — they test different things:
+- **Cold-user generalization**: `GroupShuffleSplit` by user (as before) — does the model work for someone it has never seen any feedback from.
+- **Returning-user personalization**: a time-based split *within* each user's history (train on their earlier sessions, test on their later ones) — does the model actually get better at ranking for a specific person as their history accumulates, which is meant to be GymGenius's long-term edge over a generic recommender. A model that only passes the cold-user test but not this one is a population-average ranker wearing a personalization label.
 
 **Integration**: `ml/training/train_reranker.py` reads from `recommendations`/`rec_feedback`, refuses to run below the gate, evaluates against the current fixed-weight formula on held-out (by-user) data, ships only if it wins, exports to `ml/app/models/checkpoints/reranker.joblib`. `selection/scorer.py` gets a second implementation behind a flag, so the fixed-weight version stays an instant rollback.
 
@@ -174,7 +201,9 @@ Longer-term this becomes `P(successful_session | recommendation)` rather than `P
 ml/
   training/                          # offline only - never imported by the FastAPI app
     datasets/                        # raw downloads, gitignored (**/data/** already covers it)
+    reports/                         # catalog_review.csv and other human-audit output, gitignored
     ingest_exercise_catalog.py       # §1
+    validate_catalog.py              # §1 step 6 - fails the pipeline on schema/integrity violations
     normalize.py                     # wraps artifacts/equipment_map.json, muscle_groups.json
     build_exercise_similarity_index.py  # §2
     train_cold_start_estimator.py    # §3
@@ -203,6 +232,7 @@ ml/
   deserialization fails            -> fall back; the recommendation service must never become
                                        unavailable because a .joblib didn't deploy correctly
   ```
+- `model_status()`, exposed via a new internal `GET /ml/status` endpoint, reporting what's actually loaded right now — e.g. `{"reranker": {"loaded": true, "modelVersion": "1.2.0", "artifactsVersion": "0.4.0"}, "calorie": {"loaded": false, "fallback": "MET"}}` — the fastest way to answer "is the model actually being used or did it silently fall back" without digging through logs.
 
 **Dependency split**: `requirements.txt` (runtime — inference-only: `scikit-learn`, `joblib`, plus what's already there) stays separate from a new `requirements-training.txt` (`pandas`, plus anything else only `ml/training/` needs) — training tooling has no reason to ship into the serving container.
 
@@ -221,8 +251,11 @@ gym_members_exercise:
   sha256: <hash of the downloaded file>
   rows: 973
   usable_commercially: <fill in>
+  preprocessing_version: catalog-v1     # bump whenever normalize.py/dedup logic changes -
+                                         # identical raw data can produce a different catalog
+                                         # if the normalization/merge rules change under it
 ```
-Every `train_*.py` script's eval report (§7) records which manifest entry (and hash) it trained against.
+Every `train_*.py` script's eval report (§7) records which manifest entry (hash + `preprocessing_version`) it trained against, alongside its own `MODEL_VERSION` and the `ARTIFACTS_VERSION` it ran with — that four-part chain (raw dataset hash → preprocessing version → artifact version → model version) is what makes a served prediction fully traceable back to exactly what produced it, not just approximately.
 
 ## 9. Phased roadmap
 
@@ -237,3 +270,13 @@ Continues [docs/SPEC.md](SPEC.md)'s numbering — Phases 0-7 are implemented, Ph
 | 13 | Learned re-ranker (§5): blocked on the volume/diversity gate, not on calendar time; composite utility target, by-user evaluation split | [docs/SPEC.md](SPEC.md) Phases 6-7 generating real feedback volume |
 
 Phases 9-12 don't depend on each other beyond the catalog and can run in any order or in parallel once Phase 9 lands; Phase 13 is the only one gated on something other than engineering time.
+
+**Phase 9 exit criteria** (a phase entry above describes the work; this is what "done" means for the one everything else blocks on) — `validate_catalog.py` passing is necessary but not sufficient on its own:
+- a real minimum catalog size landed (concrete number TBD once the three sources are actually merged and deduped, not guessed up front),
+- ≥ 95% of imported exercises have a canonical `primaryMuscle` and `equipment`,
+- ≥ 90% have a `movementPattern` assigned,
+- zero unresolved schema validation failures,
+- `catalog_review.csv` generated and its ambiguous-duplicate count is small enough to actually hand-review (not a backlog nobody will work through),
+- the existing recommendation engine's behavior against the new catalog is spot-checked (or covered by a regression test) before treating the 18-exercise seed as retired.
+
+Phases 10-13 should each get the same treatment — an explicit "what does done mean" list — once their design is locked in enough to write one; not restated in full here to avoid the roadmap table doubling in length before that's useful.
