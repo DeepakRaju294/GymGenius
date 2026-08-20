@@ -1,0 +1,54 @@
+{
+  "_comment": "Per-dataset column mapping (raw CSV column -> canonical field). Column names for 3 of these 4 datasets are BEST GUESSES based on common Kaggle exercise-dataset conventions - none have been downloaded/inspected yet (no Kaggle token configured as of writing this). `columnsVerified: false` means: before running ingest_exercise_catalog.py for real, run `python inspect_columns.py <file.csv>` on the actual downloaded file and fix `rawColumns` below to match. The pipeline SKIPS any source whose file isn't present in ml/training/datasets/, so partial ingestion (some sources not downloaded yet) still works.",
+  "sources": {
+    "exercises_dataset": {
+      "kaggleUrl": "https://www.kaggle.com/datasets/akankshamishra0512/exercises-dataset",
+      "filename": "exercises_dataset.csv",
+      "columnsVerified": false,
+      "rawColumns": {
+        "name": "Name",
+        "primaryMuscle": "Muscle",
+        "equipment": "Equipment"
+      },
+      "listSeparator": ","
+    },
+    "gym_exercises_dataset": {
+      "kaggleUrl": "https://www.kaggle.com/datasets/rishitmurarka/gym-exercises-dataset",
+      "filename": "gym_exercises_dataset.csv",
+      "columnsVerified": false,
+      "rawColumns": {
+        "name": "Name",
+        "primaryMuscle": "Target_Muscle",
+        "equipment": "Equipment",
+        "mechanics": "Mechanics",
+        "utility": "Utility"
+      },
+      "listSeparator": ","
+    },
+    "fitness_exercises_dataset": {
+      "kaggleUrl": "https://www.kaggle.com/datasets/exercisedb/fitness-exercises-dataset",
+      "filename": "fitness_exercises_dataset.csv",
+      "columnsVerified": true,
+      "_note": "This one mirrors the public ExerciseDB API, whose field names are well-documented (name, bodyPart, target, equipment, gifUrl, secondaryMuscles) - higher confidence than the other three, but still worth a quick inspect_columns.py check since the Kaggle CSV export could differ from the live API's JSON shape.",
+      "rawColumns": {
+        "name": "name",
+        "primaryMuscle": "target",
+        "equipment": "equipment",
+        "secondaryMuscles": "secondaryMuscles",
+        "gifUrl": "gifUrl"
+      },
+      "listSeparator": ";"
+    },
+    "gym_exercise_data": {
+      "kaggleUrl": "https://www.kaggle.com/datasets/niharika41298/gym-exercise-data",
+      "filename": "gym_exercise_data.csv",
+      "columnsVerified": false,
+      "rawColumns": {
+        "name": "Title",
+        "primaryMuscle": "BodyPart",
+        "equipment": "Equipment"
+      },
+      "listSeparator": ","
+    }
+  }
+}

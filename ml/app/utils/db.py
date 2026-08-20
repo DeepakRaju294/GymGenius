@@ -60,5 +60,6 @@ def ensure_indexes() -> None:
         db.progression_events.create_index([("username", 1), ("exerciseId", 1), ("ts", -1)])
         db.recommendations.create_index("recommendationId", unique=True)
         db.recommendations.create_index([("username", 1), ("createdAt", -1)])
+        db.fitness_assessments.create_index([("username", 1), ("createdAt", -1)])
     except PyMongoError:
         pass

@@ -1,5 +1,8 @@
 const mongoose = require('mongoose');
 
+// Mirrors ml/artifacts/taxonomies.json's movementPatterns - that file is the
+// source of truth (also read directly by ml/training/validate_catalog.py);
+// keep this list in sync if it changes there.
 const MOVEMENT_PATTERNS = [
     'horizontal_push', 'vertical_push', 'horizontal_pull', 'vertical_pull',
     'squat', 'hinge', 'lunge', 'knee_flexion',

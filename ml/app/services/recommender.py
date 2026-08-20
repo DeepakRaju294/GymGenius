@@ -14,6 +14,7 @@ from app.services.prescription.progression import apply_progression
 from app.services.adaptation.policy import ProgressionPolicy
 from app.services.adaptation.plateau import advance, fresh_state
 from app.services.adaptation.strategies import rep_adjust, reverse
+from app.services.ml.similarity import rank_by_similarity
 
 
 class Recommender:
@@ -45,13 +46,31 @@ class Recommender:
 
         candidates, history = candidate_pool(username, focus)
         catalog = get_exercise_catalog()
+        fitness_assessment = self.db.fitness_assessments.find_one({"username": username}, sort=[("createdAt", -1)])
+        bodyweight_kg = self._bodyweight_kg(username)
 
         if not candidates:
             items = self._fallback_items(goal, topn)
         else:
             scores = score_rules(candidates, history, goal, catalog)
             ranked = sorted(candidates, key=lambda ex: scores.get(ex["exerciseId"], 0.0), reverse=True)[:topn]
-            items = [self._build_item(username, ex, history, goal) for ex in ranked]
+            items = []
+            used_ids: set = set()
+            for ex in ranked:
+                resolved_ex, swap_note = self._resolve_candidate(username, ex, ranked, used_ids)
+                used_ids.add(resolved_ex["exerciseId"])
+                items.append(
+                    self._build_item(
+                        username,
+                        resolved_ex,
+                        history,
+                        goal,
+                        catalog=catalog,
+                        fitness_assessment=fitness_assessment,
+                        bodyweight_kg=bodyweight_kg,
+                        swap_note=swap_note,
+                    )
+                )
 
         rec = {
             "recommendationId": uuid.uuid4().hex,
@@ -79,12 +98,54 @@ class Recommender:
 
     # -- Selection + Prescription + Adaptation for one exercise ---------------
 
-    def _build_item(self, username: str, ex: dict, history: List[dict], goal: Optional[str]) -> Dict:
+    def _resolve_candidate(self, username: str, ex: dict, ranked: List[dict], used_ids: set) -> "tuple[dict, Optional[str]]":
+        """If this candidate's OWN progression state is already SWAPPED, don't
+        keep recommending it (docs/SPEC.md §4.2's whole point of that state) -
+        substitute a similar exercise from the rest of today's already
+        hard-filtered candidate pool instead (docs/ML_SPEC.md §2). Ranking among
+        those candidates never bypasses equipment/caution filtering, since
+        `ranked` already passed through Selection. Returns (exercise_to_actually_
+        recommend, swap_note); swap_note is None when no substitution happened."""
+        exercise_id = ex["exerciseId"]
+        state = self.db.progression_state.find_one({"username": username, "exerciseId": exercise_id})
+        if not state or state.get("currentStrategy") != "SWAPPED":
+            return ex, None
+
+        pool_ids = [c["exerciseId"] for c in ranked if c["exerciseId"] not in used_ids]
+        substitute_ids = rank_by_similarity(exercise_id, pool_ids, k=3)
+        by_id = {c["exerciseId"]: c for c in ranked}
+        for sub_id in substitute_ids:
+            if sub_id in by_id:
+                return by_id[sub_id], f"Swapped out for {ex.get('name', 'the previous exercise')}, which had plateaued."
+
+        return ex, None  # no eligible substitute in today's pool - better to keep the original than drop it
+
+    def _build_item(
+        self,
+        username: str,
+        ex: dict,
+        history: List[dict],
+        goal: Optional[str],
+        catalog: Optional[Dict[str, dict]] = None,
+        fitness_assessment: Optional[dict] = None,
+        bodyweight_kg: Optional[float] = None,
+        swap_note: Optional[str] = None,
+    ) -> Dict:
         exercise_id = ex["exerciseId"]
         state = self._get_or_advance_state(username, exercise_id, history)
         strategy = state.get("currentStrategy", "NORMAL")
         sets, reps = choose_sets_reps(goal)
-        baseline_weight = apply_progression(exercise_id, ex.get("primaryMuscle"), history)
+        progression = apply_progression(
+            exercise_id,
+            ex.get("primaryMuscle"),
+            history,
+            movement_pattern=ex.get("movementPattern"),
+            equipment=ex.get("equipment"),
+            catalog=catalog,
+            fitness_assessment=fitness_assessment,
+            bodyweight_kg=bodyweight_kg,
+        )
+        baseline_weight, evidence_tier = progression if progression else (None, None)
         prev_weight = last_top_weight(history, exercise_id)
 
         if baseline_weight is None:
@@ -98,11 +159,18 @@ class Recommender:
             reps, weight = reverse(reps, baseline_weight)
             reason = f"Still plateaued on {ex.get('name', 'this exercise')} - reversing to higher reps, lower weight."
         elif strategy == "SWAPPED":
+            # This branch means the SUBSTITUTE itself already carries a SWAPPED
+            # state from its own independent history - rare (a substitute would
+            # have to have separately plateaued through its own full cycle), but
+            # possible; not the common path, which is swap_note below.
             weight = baseline_weight
-            reason = f"Still plateaued after reversing on {ex.get('name', 'this exercise')} - consider swapping it out for a similar movement."
+            reason = f"Still plateaued after reversing on {ex.get('name', 'this exercise')} too - may be worth reviewing this muscle group's programming."
         else:
             weight = baseline_weight
-            reason = self._normal_reason(weight, prev_weight)
+            reason = self._normal_reason(weight, prev_weight, evidence_tier, ex.get("name", "this exercise"))
+
+        if swap_note:
+            reason = f"{swap_note} {reason}"
 
         change = None
         if prev_weight is not None:
@@ -144,12 +212,27 @@ class Recommender:
             self.db.progression_events.insert_one(ev)
         return state
 
-    def _normal_reason(self, weight: float, prev_weight: Optional[float]) -> str:
-        if prev_weight is None:
-            return "First time logging this - start here and we'll tune it from your results."
-        if weight > prev_weight:
-            return f"Up {weight - prev_weight:g} lb from your last session."
-        return "Matching your last session's weight."
+    def _normal_reason(self, weight: float, prev_weight: Optional[float], evidence_tier: Optional[str], exercise_name: str) -> str:
+        if evidence_tier == "recent_history":
+            if prev_weight is not None and weight > prev_weight:
+                return f"Up {weight - prev_weight:g} lb from your last session."
+            return "Matching your last session's weight."
+        if evidence_tier == "related_exercise_history":
+            return f"Estimated from your history on a similar movement - adjust as needed for {exercise_name}."
+        if evidence_tier == "anchor_performance":
+            return "Based on what you told us about your strength on a related lift."
+        if evidence_tier == "population_range":
+            return "A conservative starting suggestion for a first attempt - not personalized yet, adjust freely."
+        return "First time logging this - start here and we'll tune it from your results."
+
+    def _bodyweight_kg(self, username: str) -> Optional[float]:
+        """For §3 tier 5's bodyweight_multiplier starting ranges. Profile weight
+        may be logged in lb or kg (docs/SPEC.md §3's profileModel)."""
+        profile = self.db.profiles.find_one({"username": username})
+        if not profile or profile.get("weight") is None:
+            return None
+        weight = profile["weight"]
+        return weight if profile.get("weightUnit") == "kg" else weight * 0.453592
 
     # -- persistence ------------------------------------------------------------
 

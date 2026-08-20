@@ -70,3 +70,15 @@ class EstimateCaloriesResponse(BaseModel):
     method: Literal["model", "met"]
     modelVersion: Optional[str] = None
     intensityCategory: Optional[str] = None
+
+
+class ColdStartAssessmentRequest(BaseModel):
+    username: str
+    pushUpsPerSet: Optional[int] = Field(None, ge=0, le=200)
+    benchPressKnownWeightLb: Optional[float] = Field(None, gt=0, le=1000)
+    benchPressKnownReps: Optional[int] = Field(None, gt=0, le=50)
+    squatComfort: Optional[Literal["none", "bodyweight", "loaded"]] = None
+
+
+class ColdStartAssessmentResponse(BaseModel):
+    predictedByFamily: dict

@@ -6,9 +6,19 @@ load_dotenv()  # picks up ml/.env in local dev; a real deployment sets these dir
 
 from fastapi import FastAPI, HTTPException, Response
 
-from app.api.schemas import EstimateCaloriesRequest, EstimateCaloriesResponse, FeedbackRequest, RecommendRequest, RecommendResponse
+from app.api.schemas import (
+    ColdStartAssessmentRequest,
+    ColdStartAssessmentResponse,
+    EstimateCaloriesRequest,
+    EstimateCaloriesResponse,
+    FeedbackRequest,
+    RecommendRequest,
+    RecommendResponse,
+)
 from app.services.recommender import Recommender
+from app.services.history import now
 from app.services.ml import calorie_model
+from app.services.ml.cold_start import assess_direct
 from app.services.ml.model_registry import model_status
 from app.utils.cache import redis_ping
 from app.utils.db import ensure_indexes, mongo_ping
@@ -79,3 +89,26 @@ def estimate_calories(req: EstimateCaloriesRequest):
 @app.get("/ml/status")
 def ml_status():
     return model_status()
+
+
+@app.post("/cold-start-assessment", response_model=ColdStartAssessmentResponse)
+def cold_start_assessment(req: ColdStartAssessmentRequest):
+    predicted_by_family = assess_direct(
+        push_ups_per_set=req.pushUpsPerSet,
+        bench_press_known_weight_lb=req.benchPressKnownWeightLb,
+        bench_press_known_reps=req.benchPressKnownReps,
+        squat_comfort=req.squatComfort,
+    )
+    try:
+        recommender.db.fitness_assessments.insert_one(
+            {
+                "username": req.username,
+                "inputs": req.model_dump(exclude={"username"}),
+                "predictedByFamily": predicted_by_family,
+                "modelVersion": "cold-start-direct-0.1.0",
+                "createdAt": now(),
+            }
+        )
+    except Exception:
+        pass  # best-effort persistence - still return the assessment even if the write failed
+    return {"predictedByFamily": predicted_by_family}

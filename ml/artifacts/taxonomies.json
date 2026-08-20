@@ -1,0 +1,13 @@
+{
+  "_comment": "Canonical enum values - single source of truth. server/models/exerciseModel.js and ml/training/validate_catalog.py both mirror this list; keep them in sync if it changes.",
+  "movementPatterns": [
+    "horizontal_push", "vertical_push", "horizontal_pull", "vertical_pull",
+    "squat", "hinge", "lunge", "knee_flexion",
+    "elbow_flexion", "elbow_extension", "shoulder_abduction",
+    "core_flexion", "core_anti_extension"
+  ],
+  "mechanics": ["compound", "isolation"],
+  "utility": ["basic", "auxiliary"],
+  "movementPatternSource": ["dataset", "rule", "manual"],
+  "evidenceLevel": ["common_guidance", "anecdotal"]
+}

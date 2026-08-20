@@ -18,6 +18,16 @@ export default function Login() {
 
   const EQUIPMENT_OPTIONS = ['barbell', 'dumbbell', 'bench', 'cable', 'machine', 'bodyweight'];
 
+  // docs/ML_SPEC.md §3 - optional, skippable cold-start questions. Answering
+  // any of these gives apply_progression a real starting-weight suggestion
+  // instead of an unscaled population guess the first time you log an exercise.
+  const [coldStart, setColdStart] = useState({
+    pushUpsPerSet: '',
+    benchPressKnownWeightLb: '',
+    benchPressKnownReps: '',
+    squatComfort: ''
+  });
+
   const toggleEquipment = (item) => {
     setProfile(prev => ({
       ...prev,
@@ -44,7 +54,7 @@ export default function Login() {
 
     try {
       const res = await axios.post('http://localhost:5000/api/v1/auth/login', form);
-      const { token, user } = res.data;
+      const { token, user } = res.data.data;
 
       localStorage.setItem('token', token);
       localStorage.setItem('username', user.username);
@@ -85,6 +95,26 @@ export default function Login() {
         { ...profile, email },
         { headers: { Authorization: `Bearer ${token}` } }
       );
+
+      const hasColdStartAnswer =
+        coldStart.pushUpsPerSet || coldStart.squatComfort || (coldStart.benchPressKnownWeightLb && coldStart.benchPressKnownReps);
+      if (hasColdStartAnswer) {
+        axios
+          .post(
+            'http://localhost:5000/api/v1/cold-start/assessment',
+            {
+              pushUpsPerSet: coldStart.pushUpsPerSet ? Number(coldStart.pushUpsPerSet) : undefined,
+              benchPressKnownWeightLb: coldStart.benchPressKnownWeightLb ? Number(coldStart.benchPressKnownWeightLb) : undefined,
+              benchPressKnownReps: coldStart.benchPressKnownReps ? Number(coldStart.benchPressKnownReps) : undefined,
+              squatComfort: coldStart.squatComfort || undefined
+            },
+            { headers: { Authorization: `Bearer ${token}` } }
+          )
+          .catch(() => {
+            // Best-effort - a missed cold-start assessment just means the population
+            // starting-range fallback is used instead; it never blocks onboarding.
+          });
+      }
 
       setMessage('Profile completed successfully!');
       setTimeout(() => navigate('/dashboard'), 1500);
@@ -290,6 +320,57 @@ export default function Login() {
                 <p className="text-xs text-[#9fb0c9] mt-1.5">
                   This is what your recommendations will be filtered to - you can change it later in your profile.
                 </p>
+              </div>
+
+              <div className="rounded-xl border border-white/10 bg-black/10 p-4 space-y-3">
+                <p className="text-xs font-semibold text-[#b9c7da]">
+                  Optional - a couple of quick questions so your first weight suggestions aren't a guess
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-[#9fb0c9] mb-1">Push-ups in a row (approx.)</label>
+                    <input
+                      type="number"
+                      value={coldStart.pushUpsPerSet}
+                      onChange={(e) => setColdStart(prev => ({ ...prev, pushUpsPerSet: e.target.value }))}
+                      className={inputBase}
+                      placeholder="e.g. 15"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-[#9fb0c9] mb-1">Squat comfort</label>
+                    <select
+                      value={coldStart.squatComfort}
+                      onChange={(e) => setColdStart(prev => ({ ...prev, squatComfort: e.target.value }))}
+                      className={`${inputBase} appearance-none`}
+                    >
+                      <option value="" className="bg-[#0e141a]">Skip</option>
+                      <option value="none" className="bg-[#0e141a]">New to squatting</option>
+                      <option value="bodyweight" className="bg-[#0e141a]">Comfortable bodyweight</option>
+                      <option value="loaded" className="bg-[#0e141a]">Comfortable with added weight</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-[#9fb0c9] mb-1">Bench press weight you know (lb)</label>
+                    <input
+                      type="number"
+                      value={coldStart.benchPressKnownWeightLb}
+                      onChange={(e) => setColdStart(prev => ({ ...prev, benchPressKnownWeightLb: e.target.value }))}
+                      className={inputBase}
+                      placeholder="e.g. 135"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-[#9fb0c9] mb-1">...for how many reps</label>
+                    <input
+                      type="number"
+                      value={coldStart.benchPressKnownReps}
+                      onChange={(e) => setColdStart(prev => ({ ...prev, benchPressKnownReps: e.target.value }))}
+                      className={inputBase}
+                      placeholder="e.g. 8"
+                    />
+                  </div>
+                </div>
               </div>
             </div>
           )}
