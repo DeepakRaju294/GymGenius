@@ -5,9 +5,10 @@ const mongoose = require('mongoose');
 // keep this list in sync if it changes there.
 const MOVEMENT_PATTERNS = [
     'horizontal_push', 'vertical_push', 'horizontal_pull', 'vertical_pull',
-    'squat', 'hinge', 'lunge', 'knee_flexion',
-    'elbow_flexion', 'elbow_extension', 'shoulder_abduction',
-    'core_flexion', 'core_anti_extension'
+    'squat', 'hinge', 'lunge', 'knee_flexion', 'knee_extension',
+    'elbow_flexion', 'elbow_extension', 'shoulder_abduction', 'shoulder_rotation',
+    'shoulder_elevation', 'ankle_plantarflexion',
+    'core_flexion', 'core_anti_extension', 'core_rotation'
 ];
 
 const exerciseSchema = new mongoose.Schema({

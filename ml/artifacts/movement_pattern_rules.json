@@ -1,5 +1,5 @@
 {
-  "_comment": "docs/ML_SPEC.md §1 step 3 - rule-based movementPattern assignment for catalog ingestion. Matched as case-insensitive substrings against the normalized exercise name, first rule to match wins. Anything that matches nothing falls to manual review (movementPatternSource: 'manual').",
+  "_comment": "docs/ML_SPEC.md §1 step 3 - rule-based movementPattern assignment for catalog ingestion. Matched as case-insensitive substrings against the normalized exercise name, first rule to match wins. Anything that matches nothing falls to manual review (movementPatternSource: 'manual'). Ordering matters: more specific phrase rules must precede a broader keyword that would otherwise shadow them (e.g. lunge's \"split squat\" before squat's bare \"squat\").",
   "keyword_rules": [
     { "keywords": ["overhead press", "shoulder press", "military press", "push press", "arnold press", "landmine press"], "pattern": "vertical_push" },
     { "keywords": ["bench press", "chest press", "push-up", "pushup", "push up", "dip", "fly", "flye"], "pattern": "horizontal_push" },
@@ -7,13 +7,18 @@
     { "keywords": ["row", "face pull", "rear delt"], "pattern": "horizontal_pull" },
     { "keywords": ["lunge", "split squat", "step-up", "step up", "bulgarian"], "pattern": "lunge" },
     { "keywords": ["squat", "leg press"], "pattern": "squat" },
-    { "keywords": ["deadlift", "rdl", "romanian deadlift", "good morning", "hip thrust", "glute bridge", "kettlebell swing"], "pattern": "hinge" },
+    { "keywords": ["deadlift", "rdl", "romanian deadlift", "good morning", "hip thrust", "glute bridge", "kettlebell swing", "hyperextension", "back extension", "reverse hyper", "hip extension"], "pattern": "hinge" },
     { "keywords": ["leg curl", "hamstring curl", "nordic curl"], "pattern": "knee_flexion" },
+    { "keywords": ["leg extension"], "pattern": "knee_extension" },
     { "keywords": ["bicep curl", "hammer curl", "preacher curl", "curl"], "pattern": "elbow_flexion" },
     { "keywords": ["tricep", "pushdown", "skull crusher", "kickback", "close-grip", "close grip"], "pattern": "elbow_extension" },
-    { "keywords": ["lateral raise", "front raise", "upright row"], "pattern": "shoulder_abduction" },
+    { "keywords": ["external rotation", "internal rotation", "rotator cuff"], "pattern": "shoulder_rotation" },
+    { "keywords": ["lateral raise", "front raise", "upright row", "shoulder raise"], "pattern": "shoulder_abduction" },
+    { "keywords": ["shrug"], "pattern": "shoulder_elevation" },
+    { "keywords": ["calf raise", "calf press", "donkey calf"], "pattern": "ankle_plantarflexion" },
     { "keywords": ["crunch", "sit-up", "situp", "sit up", "leg raise", "v-up"], "pattern": "core_flexion" },
-    { "keywords": ["plank", "pallof", "dead bug", "ab wheel", "hollow hold"], "pattern": "core_anti_extension" }
+    { "keywords": ["plank", "pallof", "dead bug", "ab wheel", "hollow hold"], "pattern": "core_anti_extension" },
+    { "keywords": ["twist", "wood chop", "woodchop", "russian twist"], "pattern": "core_rotation" }
   ],
   "hybrid_rules": [
     { "keywords": ["thruster"], "pattern": "squat", "secondaryPatterns": ["vertical_push"] },
